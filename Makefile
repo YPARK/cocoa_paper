@@ -79,4 +79,4 @@ result/temp/%.lab.gz:
 # % = $(celltype)_$(pheno_col)
 result/cocoa/%.resid_mu.gz: result/temp/%.mtx.gz result/temp/%.cols.gz result/temp/%.annot.gz result/temp/%.trt.gz result/temp/%.lab.gz result/temp/%.ind.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	mmutil_cfa_col --mtx result/temp/$*.mtx.gz --col result/temp/$*.cols.gz --annot result/temp/$*.annot.gz --trt result/temp/$*.trt.gz --lab result/temp/$*.lab.gz --ind result/temp/$*.ind.gz --verbose --knn 10 --nboot 100 --rank 50 --log_scale --out $(shell echo $@ | sed 's/.resid_mu.gz//g')
+	OMP_NUM_THREADS=10 mmutil_cfa_col --mtx result/temp/$*.mtx.gz --col result/temp/$*.cols.gz --annot result/temp/$*.annot.gz --trt result/temp/$*.trt.gz --lab result/temp/$*.lab.gz --ind result/temp/$*.ind.gz --verbose --knn 10 --nboot 100 --rank 50 --log_scale --out $(shell echo $@ | sed 's/.resid_mu.gz//g')
