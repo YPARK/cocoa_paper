@@ -39,14 +39,14 @@ result/phenotyped.txt.gz: R/find_phenotyped.R $(PHENO_DATA)
 # note: "result/phenotyped.txt.gz" contains TAG,IID,{Pheno_types}
 NPheno := $(shell [ -f result/phenotyped.txt.gz ] && gzip -cd result/phenotyped.txt.gz | head -n1 | awk '{ print (NF -2) }')
 
-pheno_ := $(shell seq 1 $(NPheno))
+pheno_ := 1
 
 step2: $(foreach c, $(CT), $(foreach f, $(pheno_), result/cocoa/$(c)_$(f).resid_mu.gz))
 
 # % = $(celltype)_$(pheno_col)
 result/temp/%.pheno_select.gz: result/phenotyped.txt.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	gzip -cd $< | awk -F'\t' -vC=$(shell echo $* | awk -F'_' '{ print $$2 }') 'NR > 1 && $$(C + 2) != "NA" && length($$(C + 2)) > 0 { print $$1 }' | gzip > $@
+	gzip -cd $< | awk -F'\t' -vC=$(shell echo $* | awk -F'_' '{ print $$2 }') 'NR > 1 && $$(C + 2) != -9 && $$(C + 2) != "NA" && length($$(C + 2)) > 0 { print $$1 }' | gzip > $@
 
 # % = $(celltype)_$(pheno_col)
 result/temp/%.mtx.gz: result/temp/%.pheno_select.gz
@@ -79,4 +79,25 @@ result/temp/%.lab.gz:
 # % = $(celltype)_$(pheno_col)
 result/cocoa/%.resid_mu.gz: result/temp/%.mtx.gz result/temp/%.cols.gz result/temp/%.annot.gz result/temp/%.trt.gz result/temp/%.lab.gz result/temp/%.ind.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	OMP_NUM_THREADS=10 mmutil_cfa_col --mtx result/temp/$*.mtx.gz --col result/temp/$*.cols.gz --annot result/temp/$*.annot.gz --trt result/temp/$*.trt.gz --lab result/temp/$*.lab.gz --ind result/temp/$*.ind.gz --verbose --knn 10 --nboot 100 --rank 50 --log_scale --out $(shell echo $@ | sed 's/.resid_mu.gz//g')
+	OMP_NUM_THREADS=16 mmutil_cfa_col --mtx result/temp/$*.mtx.gz --col result/temp/$*.cols.gz --annot result/temp/$*.annot.gz --trt result/temp/$*.trt.gz --lab result/temp/$*.lab.gz --ind result/temp/$*.ind.gz --verbose --knn 100 --nboot 100 --rank 50 --log_scale --out $(shell echo $@ | sed 's/.resid_mu.gz//g')
+
+################################################################
+
+step3: $(foreach c, $(CT), result/aggregate/$(c).mean.gz)
+
+# % = $(celltype)
+result/aggregate/%.mean.gz: result/sorted/%.mtx.gz result/sorted/%.cols.gz result/aggregate/%.ind.gz result/aggregate/%.lab.gz result/aggregate/%.annot.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	mmutil_aggregate_col --mtx result/sorted/$*.mtx.gz --col result/sorted/$*.cols.gz  --annot result/aggregate/$*.annot.gz --ind result/aggregate/$*.ind.gz --lab result/aggregate/$*.lab.gz --verbose --out $(shell echo $@ | sed 's/.mean.gz//')
+
+result/aggregate/%.annot.gz: result/sorted/%.cols.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	gzip -cd $< | awk '{ print $$1 FS "$*" }' | gzip -c > $@
+
+result/aggregate/%.ind.gz: R/match_pheno.R result/sorted/%.cols.gz result/phenotyped.txt.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	Rscript --vanilla $^ 0 $@
+
+result/aggregate/%.lab.gz: result/sorted/%.cols.gz 
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	echo $* | gzip -c > $@
