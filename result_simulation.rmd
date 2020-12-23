@@ -1,0 +1,120 @@
+---
+title: ""
+author: "Yongjin Park"
+---
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(patchwork)
+
+`%&%` <- function(a,b) paste0(a,b)
+```
+
+```{r}
+.read <- function(hdr) {
+  .files <- list.files(hdr %&% "/result/",
+                       pattern = "eval", full.names=TRUE)
+
+  .dat <- lapply(.files, fread, header=T) %>%
+    do.call(what=rbind) %>%
+    mutate(p1 = as.numeric("0." %&% p1)) %>% 
+    mutate(pa = as.numeric("0." %&% pa)) %>% 
+    mutate(p0 = as.numeric("0." %&% p0))
+}
+
+read.power <- function(hdr, fdr.cutoff = .1) {
+
+  .dat <- .read(hdr)
+  .ret <- .dat[order(.dat$power, decreasing=TRUE)]
+  .ret <- .ret[fdr <= fdr.cutoff, head(.SD, 1),
+               by = .(p1, p0, pa, rseed, method)]
+
+  .ret[, fdr.cutoff := fdr.cutoff]
+
+  return(.ret)
+}
+
+read.f1 <- function(hdr) {
+
+  .dat <- .read(hdr)
+  .ret <- .dat[order(.dat$f1, decreasing=TRUE)]
+  .ret <- .ret[, head(.SD, 1),
+               by = .(p1, p0, pa, rseed, method)]
+
+  return(.ret)
+}
+
+.rename <- function(.sum) {
+
+  .method <- c("opt","cocoa","marg")
+  .lab <- c("optimal", "CoCoA", "marginal")
+  .sum[, method := factor(method, .method, .lab)]
+
+  .pa <- sort(unique(.sum$pa))
+  .pa.lab <- "X to W (" %&% round(.pa * 100) %&% "%)"
+  .sum[, pa := factor(pa, .pa, .pa.lab)]
+
+  return(.sum)
+}
+
+.ggplot <- function(...) {
+  .scale.x <-
+    scale_x_continuous("% variance explained by phenotype (W)",
+                       labels=function(x) round(100 * x))
+  ggplot(...) +
+    theme_bw() +
+    theme(strip.text = element_text(size=8)) +
+    theme(legend.text = element_text(size=8)) +
+    theme(legend.title = element_text(size=6)) +
+    scale_linetype_manual(values=c(3, 1, 2))+
+    .scale.x    
+}
+
+plot.power <- function(.dt) {
+
+  .sum <- .dt[, .(y = mean(power), y.se = sd(power)/sqrt(.N)),
+              by = .(p1, p0, pa, method, fdr.cutoff)]
+
+  .cutoff <- min(.sum$fdr.cutoff)
+
+  .sum <- .rename(.sum)
+
+  .aes <- aes(x = p1, y = y, ymin = y - y.se, ymax = y + y.se, lty = method)
+
+  .ggplot(.sum, .aes) +
+    facet_wrap(~pa, nrow=1, scales="free") +
+    ylab("power at FDR < " %&% .cutoff) +
+    geom_line() +
+    geom_linerange(lty=1)
+}
+
+plot.f1 <- function(.dt) {
+
+  .sum <- .dt[, .(y = mean(f1), y.se = sd(f1)/sqrt(.N)),
+              by = .(p1, p0, pa, method)]
+
+  .sum <- .rename(.sum)
+
+  .aes <- aes(x = p1, y = y, ymin = y - y.se, ymax = y + y.se, lty = method)
+
+  .ggplot(.sum, .aes) +
+    facet_wrap(~pa, nrow=1, scales="free") +
+    ylab("F1 score in PR curve") +
+    geom_line() +
+    geom_linerange(lty=1)
+}
+```
+
+```{r fig.width=6, fig.height=5}
+p1 <- plot.f1(read.f1("sim_N40_M50")) + ggtitle("50 cells per individual")
+p2 <- plot.f1(read.f1("sim_N40_M10")) + ggtitle("10 cells per individual")
+p1/p2
+```
+
+```{r fig.width=6, fig.height=5}
+p1 <- plot.power(read.power("sim_N40_M50")) + ggtitle("50 cells per individual")
+p2 <- plot.power(read.power("sim_N40_M10")) + ggtitle("10 cells per individual")
+p1/p2
+```
+

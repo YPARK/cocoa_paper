@@ -1,4 +1,6 @@
-## CoCoA-Diff analysis for Mathys et al. (2019) data
+#####################################################
+# CoCoA-Diff analysis for Mathys et al. (2019) data #
+#####################################################
 
 ROW := data/brain_2018-05-03/features.tsv.gz
 COL := data/brain_2018-05-03/barcodes.tsv.gz
@@ -98,6 +100,26 @@ result/aggregate/%.ind.gz: R/match_pheno.R result/sorted/%.cols.gz result/phenot
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	Rscript --vanilla $^ 0 $@
 
-result/aggregate/%.lab.gz: result/sorted/%.cols.gz 
+result/aggregate/%.lab.gz: result/sorted/%.cols.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	echo $* | gzip -c > $@
+
+#################
+# documentation #
+#################
+
+RMD := $(wildcard *.rmd)
+HTML := $(RMD:.rmd=.html)
+PDF := $(RMD:.rmd=.pdf)
+DOCX := $(RMD:.rmd=.docx)
+
+doc: $(HTML) $(DOCX) $(PDF)
+
+%.html: %.rmd $(COMMON)
+	Rscript -e "library(rmarkdown); render('$<');"
+
+%.pdf: %.rmd $(COMMON)
+	Rscript -e "library(rmarkdown); render('$<', 'pdf_document');"
+
+%.docx: %.rmd $(COMMON)
+	Rscript -e "library(rmarkdown); render('$<', 'word_document');"
