@@ -20,8 +20,8 @@ library(data.table)
 
 .apoe.code <- function(x) {
     if(is.na(x)) return(NA)
-    if(x == 44) return(2)
-    if(x %in% c(24, 34)) return(1)
+    if(x == 44) return(1)          # clump dosage info
+    if(x %in% c(24, 34)) return(1) # into two categories
     return(0)
 }
 
@@ -33,6 +33,6 @@ library(data.table)
 .cols <- fread(meta.file, header=TRUE)
 .cols <- left_join(.cols, .pheno, by = "projid")
 
-.out <- .cols[, .(TAG, projid, pathoAD, msex, age.death, apoe.e4)]
+.out <- .cols[, .(TAG, projid, pathoAD, apoe.e4, msex, age.death)] %>% na.omit
 
 fwrite(.out, out.file, col.names=TRUE, row.names=FALSE, sep="\t")
