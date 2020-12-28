@@ -41,7 +41,7 @@ result/phenotyped.txt.gz: R/find_phenotyped.R $(PHENO_DATA)
 # note: "result/phenotyped.txt.gz" contains TAG,IID,{Pheno_types}
 NPheno := $(shell [ -f result/phenotyped.txt.gz ] && gzip -cd result/phenotyped.txt.gz | head -n1 | awk '{ print (NF -2) }')
 
-pheno_ := 1
+pheno_ := 1 2
 
 step2: $(foreach c, $(CT), $(foreach f, $(pheno_), result/cocoa/$(c)_$(f).resid_mu.gz result/aggregate/$(c)_$(f).mean.gz))
 
@@ -87,6 +87,16 @@ result/cocoa/%.resid_mu.gz: result/temp/%.mtx.gz result/temp/%.cols.gz result/te
 result/aggregate/%.mean.gz: result/temp/%.mtx.gz result/temp/%.cols.gz result/temp/%.annot.gz result/temp/%.trt.gz result/temp/%.lab.gz result/temp/%.ind.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	mmutil_aggregate_col --mtx result/temp/$*.mtx.gz --col result/temp/$*.cols.gz --annot result/temp/$*.annot.gz --lab result/temp/$*.lab.gz --ind result/temp/$*.ind.gz --verbose --out $(shell echo $@ | sed 's/.mean.gz//g')
+
+################################################################
+# Statistical test after adjustment
+GLOB_STAT := $(foreach c, $(CT), $(foreach f, $(pheno_), result/glob_stat/$(c)_$(f).stat.gz))
+
+step3: $(GLOB_STAT)
+
+result/glob_stat/%.stat.gz: R/calc_glob_stat.R result/cocoa/%.boot_ln_mu.gz result/cocoa/%.mu_cols.gz result/aggregate/%.sum.gz result/aggregate/%.mean.gz result/aggregate/%.mu_cols.gz data/brain_2018-05-03/features.tsv.gz result/phenotyped.txt.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	Rscript --vanilla $^ $@
 
 #################
 # documentation #

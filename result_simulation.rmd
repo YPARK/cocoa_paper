@@ -1,17 +1,23 @@
 ---
-title: ""
+title: "Simulation results for the causal discovery of DEGs"
 author: "Yongjin Park"
 ---
 
-```{r}
+```{r include = FALSE}
 library(data.table)
 library(tidyverse)
 library(patchwork)
+source("R/Util-rmd.R")
 
-`%&%` <- function(a,b) paste0(a,b)
+fig.dir = 'Fig/Simulation/'
+
+dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
+knitr::opts_chunk$set(fig.path = fig.dir, fig.width = 6, fig.height = 4)
+knitr::opts_chunk$set(dev.args = list(bg = "transparent"), echo = FALSE)
+options(stringsAsFactors = FALSE)
 ```
 
-```{r}
+```{r include = FALSE}
 .read <- function(hdr) {
   .files <- list.files(hdr %&% "/result/",
                        pattern = "eval", full.names=TRUE)
@@ -109,12 +115,26 @@ plot.f1 <- function(.dt) {
 ```{r fig.width=6, fig.height=5}
 p1 <- plot.f1(read.f1("sim_N40_M50")) + ggtitle("50 cells per individual")
 p2 <- plot.f1(read.f1("sim_N40_M10")) + ggtitle("10 cells per individual")
-p1/p2
+plt <- p1/p2
+print(plt)
+.file <- fig.dir %&% "/Fig_Sim_F1.pdf"
+.gg.save(.file, plot=plt, width=6, height=5)
 ```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
 
 ```{r fig.width=6, fig.height=5}
 p1 <- plot.power(read.power("sim_N40_M50")) + ggtitle("50 cells per individual")
 p2 <- plot.power(read.power("sim_N40_M10")) + ggtitle("10 cells per individual")
-p1/p2
+plt <- p1/p2
+print(plt)
+.file <- fig.dir %&% "/Fig_Sim_Power.pdf"
+.gg.save(.file, plot=plt, width=6, height=5)
 ```
 
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```

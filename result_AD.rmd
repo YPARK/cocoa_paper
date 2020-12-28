@@ -1,0 +1,783 @@
+---
+title: "Counterfactual Confounder Adjustment for Single-cell Differential Expression Analysis"
+author: "Yongjin Park"
+---
+
+```{r include=FALSE}
+library(tidyverse)
+library(data.table)
+library(patchwork)
+library(R.utils)
+source("R/Util-rmd.R")
+
+## document options
+fig.dir = 'Fig/AD/'
+dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
+knitr::opts_chunk$set(fig.path = fig.dir, fig.width = 6, fig.height = 4)
+knitr::opts_chunk$set(dev.args = list(bg = "transparent"), echo = FALSE)
+options(stringsAsFactors = FALSE)
+
+## helper functions
+.fread <- function(...) fread(..., header=FALSE)
+.fwrite <- function(...) fwrite(..., sep="\t", col.names=FALSE, row.names=FALSE)
+.read.mat <- function(...) .fread(...) %>% as.matrix
+```
+
+```{r include = FALSE}
+gene.ontology <- read.ontology()
+
+coding.genes <-
+    gene.ontology$coding %>%
+    rename(gene = hgnc_symbol) %>%
+    filter(chromosome_name %in% as.character(1:22))
+
+.colors <- fread("data/brain_colors.txt")
+```
+
+# Results
+
+## Cell type annotation
+
+```{r include = FALSE}
+marker.genes <- .fread("data/PsychENCODE.marker",
+                       col.names = c("geneSymbol", "celltype"))
+
+.ro <- rev(c("Ex", "In", "Oligo", "OPC",
+             "Microglia", "Astro", "Per", "Endo"))
+
+.col <- tibble(ct = .ro) %>%
+    left_join(.colors, by = "ct") %>%
+    select(hex) %>%
+    unlist %>%
+    as.character
+
+.marker.order <- list(ro = .ro, col = .col)
+
+.marker.order$co <-
+    marker.genes %>%
+    mutate(row = celltype, col = geneSymbol, weight = 1) %>%
+    col.order(.ro)
+```
+
+```{r Fig_Marker_Genes, fig.width=6, fig.height=1.5}
+.df <-
+    marker.genes %>%
+    mutate(row = factor(celltype, .marker.order$ro)) %>% 
+    mutate(col = factor(geneSymbol, .marker.order$co))
+    
+plt <-
+    .gg.plot(.df, aes(y=row, x=col)) +
+    geom_tile() +
+    xlab(num.int(nrow(marker.genes)) %&% " marker genes") +
+    ylab("cell types") + 
+    theme(axis.ticks.x=element_blank()) +
+    theme(axis.text.x=element_blank())
+print(plt)
+.file <- fig.dir %&% "/Fig_Marker_Genes.pdf"
+.gg.save(.file, plot=plt, width=6, height=1.5)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+
+PsychENCODE's marker gene selection might be imperfect since some
+"marker" genes are shared by different cell types. However, it has
+enough discriminatory power. Using this initial dictionary of marker
+genes, we can start analyzing 10x data, which consist of these three
+files:
+
+* Sparse count matrix:
+
+```{bash}
+gzip -cd data/brain_2018-05-03/filtered_count_matrix.mtx.gz | head
+```
+
+* Cell barcode list:
+
+```{bash}
+gzip -cd data/brain_2018-05-03/barcodes.tsv.gz | head
+```
+
+* Gene/feature list (**these names should exist in the marker file**):
+
+```{bash}
+gzip -cd data/brain_2018-05-03/features.tsv.gz | head
+```
+
+
+```{r Fig_Marker_Weighted, fig.width=6, fig.height=2}
+
+.labels <- .fread("result/celltype.label_names.gz") %>% unlist
+
+.genes <- .fread("result/celltype.marker_names.gz") %>% unlist
+
+.dt <-
+    .fread("result/celltype.marker_profile.gz", col.names=.labels) %>%
+    mutate(geneSymbol = .genes) %>%
+    melt(id.vars = "geneSymbol", value.name = "mu", variable.name = "celltype") %>%
+    mutate(row = factor(celltype, .marker.order$ro)) %>% 
+    mutate(col = factor(geneSymbol, .marker.order$co))
+
+plt <- 
+    .gg.plot(.dt, aes(y=row, x=col, fill = sqrt(mu))) +
+    theme(legend.position = "top") +
+    geom_tile() +
+    scale_fill_distiller("", palette="RdPu", direction=1) +
+    xlab(length(.genes) %&% " genes present in snRNA-seq") +
+    ylab("cell types") + 
+    theme(axis.ticks.x=element_blank()) +
+    theme(axis.text.x=element_blank())
+
+print(plt)
+.file <- fig.dir %&% "/Fig_Marker_Weighted.pdf"
+.gg.save(.file, plot=plt, width=6, height=2)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+
+### Basic statistics for cell type annotation
+
+```{r include = FALSE}
+read.pheno <- function() {
+
+    .apoe.code <- function(x) {
+        if(is.na(x)) return(NA) 
+        if(x == 44) return(2)
+        if(x %in% c(24, 34)) return(1)
+        return(0) 
+    }
+
+    pheno.dt <- fread("data/brain_2018-05-03/phenotypes.csv",
+                      header=TRUE, na.strings = "-9")
+
+    pheno.dt[, apoe.e4 := sapply(apoe_genotype, .apoe.code)]
+    return(pheno.dt)
+}
+
+take.assoc.stat <- function(.dt, .pheno, log.trans = TRUE) {
+    
+    .dt.flat <- dcast(.dt, gene ~ projid, value.var = "cf")
+
+    .xtib <- .dt.flat %>% select(gene) %>% mutate(x.col = 1:n())
+    .mat <- .dt.flat %>% select(-gene) %>% as.matrix
+
+    if(log.trans) {
+        .xx <- t(log(1 + .mat)) %>% scale
+    } else {
+        .xx <- scale(.mat)
+    }
+
+    .yy <-
+        data.table(projid= as.integer(colnames(.mat))) %>%
+        left_join(.pheno, by = "projid") %>%
+        select(-projid) %>%
+        as.matrix
+
+    .ytib <-
+        tibble(pheno = colnames(.yy)) %>%
+        mutate(y.col = 1:n())
+
+    zqtl::calc.qtl.stat(.xx, .yy) %>%
+        left_join(.xtib, by = "x.col") %>%
+        left_join(.ytib, by = "y.col") %>%
+        select(-x.col, -y.col) %>% 
+        as.data.table
+}
+
+.pheno <- fread("data/brain_2018-05-03/filtered_column_metadata.txt.gz")
+
+.annot.dt <- .fread("result/celltype.annot.gz",
+                    col.names=c("TAG", "ct", "pr", "llik")) %>%
+    left_join(.pheno, by = "TAG") %>% 
+    na.omit %>% 
+    as.data.table
+
+.tot.i.freq.dt <-
+    .annot.dt[, .(n = .N), by = .(projid)]
+
+.tot.ct.freq.dt <-
+    .annot.dt[, .(n = .N), by = .(ct)]
+
+.ct.freq.dt <-
+    .annot.dt[, .(n = .N), by = .(ct, projid)]
+
+.ct.freq.dt[, pr := n/sum(n), by = .(projid)]
+```
+
+```{r Fig_CT_Freq, fig.width=3, fig.height=4}
+.projid <- .ct.freq.dt %>%
+    filter(ct == "Ex") %>%
+    arrange(desc(n)) %>%
+    select(projid) %>% unlist
+
+.ct.freq.dt <- .ct.freq.dt %>%
+    mutate(projid = factor(projid, .projid)) %>%
+    mutate(ct = factor(ct, .marker.order$ro))   
+
+.avg.ct.dt <-
+    .ct.freq.dt[,
+                .(.mean = mean(n), .sd = sd(n), .max = max(n), .min = min(n),
+                  .mean.f = mean(pr), .sd.f = sd(pr), .max.f = max(pr), .min.f = min(pr)),
+                by = .(ct)] %>%
+    mutate(str = num.round(.mean.f*100)  %&% "% (N=" %&% num.int(round(.mean)) %&% " $\\pm$ " %&% round(.sd) %&% ") cells for " %&% ct)
+
+p2 <- 
+    .gg.plot(.ct.freq.dt, aes(x = projid, y = pr, fill = ct)) +
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_blank()) +
+    theme(axis.ticks.x = element_blank()) +
+    xlab(length(.projid) %&% " individuals") +
+    ylab("Cell type fraction") +
+    scale_fill_manual(values = .marker.order$col)
+
+p1 <- 
+    .gg.plot(.ct.freq.dt, aes(x = projid, y = n, fill = ct)) +
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_blank()) +
+    theme(axis.ticks.x = element_blank()) +
+    xlab(length(.projid) %&% " individuals") +
+    ylab("#Cells") +
+    scale_fill_manual(values = .marker.order$col)
+
+plt <- p1 / p2
+print(plt)
+.file <- fig.dir %&% "/Fig_CT_Freq.pdf"
+.gg.save(.file, plot=plt, width = 3, height = 4)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+* `r num.int(round(mean(.tot.i.freq.dt$n)))` cells per individual, including `r paste(.avg.ct.dt$str, collapse=", ")` on average.
+
+
+## Differential expression analysis
+
+
+```{r include = FALSE}
+gene.name.file <- "data/brain_2018-05-03/filtered_gene_row_names.txt.gz"
+
+#' @param data.file E.g., "result/cocoa/.resid_mu.gz"
+#' @param .name E.g., "resid.mu"
+#' @param col.file E.g., "result/cocoa/output.mu_cols.gz"
+#' @param row.file E.g., "result/rna.rows.gz"
+.read.stat <- function(data.file,
+                       .name,
+                       col.file,
+                       row.file = gene.name.file) {
+
+    .rows <- .fread(row.file) %>% unlist
+    .cols <- .fread(col.file) %>% unlist
+
+    .ret <- .fread(data.file, col.names = .cols, colClasses="double")
+    .ret[, gene := .rows]
+
+    melt.data.table(.ret, id.vars = "gene",
+                           variable.name = "col",
+                           value.name = .name)
+}
+
+.read.cf <- function(ct.code) {
+    .data.f <- "result/cocoa/" %&% ct.code %&% ".cf_mu.gz"
+    .col.f <- "result/cocoa/" %&% ct.code %&% ".mu_cols.gz"
+    .dt <- .read.stat(.data.f, "cf", .col.f)
+    .dt[, c("projid","ct","pheno.col") := tstrsplit(col,split="_")]
+    .dt[, projid := as.integer(projid)]
+    .dt[, pheno.col := as.integer(pheno.col)]
+    return(.dt)
+}
+
+.read.cocoa <- function(.ct.code) {
+    .data.f <- "result/cocoa/" %&% .ct.code %&% ".boot_ln_mu.gz"
+    .sd.f <- "result/cocoa/" %&% .ct.code %&% ".boot_sd_ln_mu.gz"
+    .tot.f <- "result/aggregate/" %&% .ct.code %&% ".sum.gz"
+    .avg.f <- "result/aggregate/" %&% .ct.code %&% ".mean.gz"
+    .col.f <- "result/cocoa/" %&% .ct.code %&% ".mu_cols.gz"
+
+    .dt <- .read.stat(.data.f, "ln.mu", .col.f)
+    .dt.sd <- .read.stat(.sd.f, "ln.mu.sd", .col.f)
+    .dt.tot <- .read.stat(.tot.f, "tot", .col.f)
+    .dt.avg <- .read.stat(.avg.f, "avg", .col.f)
+
+    .dt <- merge(.dt, .dt.sd) %>% merge(.dt.tot) %>% merge(.dt.avg)
+    .dt[, c("projid","ct","pheno.col") := tstrsplit(col,split="_")]
+    .dt[, projid := as.integer(projid)]
+    .dt[, pheno.col := as.integer(pheno.col)]
+    return(.dt)
+}
+```
+
+```{r read_glob_stat, include=FALSE}
+ct.names <- c("Ex", "In", "Oligo", "OPC", "Microglia", "Astro", "Per", "Endo")
+
+glob.dt <-
+    lapply(ct.names,
+           function(.ct) {
+               fread("result/glob_stat/" %&% .ct %&% "_1.stat.gz", header=TRUE) %>%
+                   mutate(ct = .ct) %>%
+                   as.data.table
+           }) %>% 
+    do.call(what=rbind)
+
+glob.dt <- left_join(coding.genes, glob.dt, by = "gene") %>%
+    na.omit
+
+avg.dt <- glob.dt[method == "avg"] %>%
+    group_by(ct) %>% 
+    mutate(qv = p.adjust(wilcox.pv, "fdr")) %>% 
+    ungroup() %>%
+    as.data.table
+
+tot.dt <- glob.dt[method == "tot"] %>%
+    group_by(ct) %>% 
+    mutate(qv = p.adjust(wilcox.pv, "fdr")) %>% 
+    ungroup() %>%
+    as.data.table
+
+cocoa.dt <- glob.dt[method == "cocoa"] %>%
+    group_by(ct) %>% 
+    mutate(qv = p.adjust(wilcox.pv, "fdr")) %>% 
+    mutate(fwer = p.adjust(wilcox.pv, "holm")) %>% 
+    ungroup() %>%
+    as.data.table
+```
+
+```{r include=FALSE}
+n.fdr01.genes <- cocoa.dt[qv < .01, .(gene)] %>% unique %>% nrow
+n.tot.genes <- cocoa.dt[, .(gene)] %>% unique %>% nrow
+n.fdr01.ct.genes <- cocoa.dt[qv < .01, .(n=length(unique(gene))), by=.(ct)] %>%
+    mutate(str = num.int(n) %&% " found in " %&% ct) %>%
+    arrange(factor(ct, rev(.marker.order$ro)))
+```
+
+### CoCoA identified `r num.int(n.fdr01.genes)` genes are differentially-regulated between different AD conditions
+
+* `r num.int(n.fdr01.genes)` genes (`r num.round(100 * n.fdr01.genes / n.tot.genes)`%) consist of `r paste(n.fdr01.ct.genes$str, collapse=", ")`
+
+```{r Fig_cocoa_vs_avg, fig.width=8, fig.height=2, results="asis"}
+.dt <-
+    avg.dt[, .(gene, ct, wilcox.pv)] %>%
+    left_join(cocoa.dt[, .(gene, ct, wilcox.pv, qv)],
+              by = c("gene", "ct"), suffix=c(".avg",".cocoa")) %>%
+    left_join(tot.dt[, .(gene, ct, wilcox.pv)],
+              by = c("gene", "ct")) %>% 
+    rename(wilcox.pv.tot = wilcox.pv) %>% 
+    mutate(ct = factor(ct, rev(.marker.order$ro)))
+
+.dt.lab <- .dt[qv < .01]
+
+.aes <-
+    aes(x=-log10(wilcox.pv.avg), y=-log10(wilcox.pv.cocoa), fill=ct)
+
+.gg.plot(.dt, .aes) +
+    xlab("Wilcoxon test p-values on the average pseudo-bulk (-log10)") +
+    ylab("Wilcoxon test p-values on\n the CoCoA pseudo-bulk  (-log10)") +
+    facet_wrap(~ct, nrow=1) +
+    geom_point(pch=21, size=.5, stroke=0) +
+    geom_point(data=.dt.lab, pch=21, size=1, stroke=.1) +
+    geom_density2d(size=.5, colour="black") +
+    geom_abline(slope=1, intercept=0, size=.5) +
+    scale_fill_manual(values=rev(.marker.order$col), guide=FALSE)
+
+.file <- fig.dir %&% "/Fig_cocoa_vs_avg.pdf"
+.gg.save(.file, plot=plt, width = 8, height = 2)
+cat("\n\n[PDF](" %&% .file %&% ")\n\n")
+
+.aes <-
+    aes(x=-log10(wilcox.pv.tot), y=-log10(wilcox.pv.cocoa), fill=ct)
+
+.gg.plot(.dt, .aes) +
+    xlab("Wilcoxon test p-values on the total pseudo-bulk (-log10)") +
+    ylab("Wilcoxon test p-values on\n the CoCoA pseudo-bulk  (-log10)") +
+    facet_wrap(~ct, nrow=1) +
+    geom_point(pch=21, size=.5, stroke=0) +
+    geom_point(data=.dt.lab, pch=21, size=1, stroke=.1) +
+    geom_density2d(size=.5, colour="black") +
+    geom_abline(slope=1, intercept=0, size=.5) +
+    scale_fill_manual(values=rev(.marker.order$col), guide=FALSE)
+
+.file <- fig.dir %&% "/Fig_cocoa_vs_tot.pdf"
+.gg.save(.file, plot=plt, width = 8, height = 2)
+cat("\n\n[PDF](" %&% .file %&% ")\n\n")
+
+.aes <-
+    aes(x=-log10(wilcox.pv.tot), y=-log10(wilcox.pv.avg), fill=ct)
+
+.gg.plot(.dt, .aes) +
+    xlab("Wilcoxon test p-values on the total pseudo-bulk (-log10)") +
+    ylab("Wilcoxon test p-values on \nthe average pseudo-bulk (-log10)") +
+    facet_wrap(~ct, nrow=1) +
+    geom_point(pch=21, size=.5, stroke=0) +
+    geom_point(data=.dt.lab, pch=21, size=1, stroke=.1) +
+    geom_density2d(size=.5, colour="black") +
+    geom_abline(slope=1, intercept=0, size=.5) +
+    scale_fill_manual(values=rev(.marker.order$col), guide=FALSE)
+
+.file <- fig.dir %&% "/Fig_avg_vs_tot.pdf"
+.gg.save(.file, plot=plt, width = 8, height = 2)
+cat("\n\n[PDF](" %&% .file %&% ")\n\n")
+```
+
+
+```{r Fig_pvalue_distribution, fig.width=6, fig.height=2, message=FALSE}
+.file <- fig.dir %&% "/Fig_pvalue_distribution"
+pdf(file = .file, width=6, height=2)
+par(mfrow=c(1,3))
+hist(.dt$wilcox.pv.cocoa, main="CoCoA", xlab="p-value", breaks=20)
+hist(.dt$wilcox.pv.avg, main="Average", xlab="p-value", breaks=20)
+hist(.dt$wilcox.pv.tot, main="Total", xlab="p-value", breaks=20)
+dev.off()
+```
+
+```{r results="asis"}
+cat("[p-value distribution](" %&% .file %&% ")\n\n")
+```
+
+```{r include = FALSE}
+#' Show one gene against multiple relevant phenotype
+#' @param g
+#' @param eg.dt
+show.one.gene <- function(.eg.dt, .dt.lab) {
+
+    .eg.dt <-
+        .eg.dt %>% 
+        left_join(pheno.dt, by = "projid") %>%
+        arrange(ln.mu, pathoAD) %>% 
+        mutate(i = 1:n()) %>% 
+        mutate(pathoAD = factor(pathoAD, c(0,1), c("non-AD", "AD")))
+
+    .title <- .dt.lab$gene %&% " (p = " %&% num.sci(.dt.lab$wilcox.pv) %&% ")"
+
+    .plot <- function(...)
+        .gg.plot(...) +
+            theme(legend.position="bottom") +
+            scale_color_manual(values=c("gray40", "#7022A7")) +
+            scale_fill_manual(values=c("white", "#7022A7"))    
+
+    p1 <-
+        .plot(.eg.dt, aes(x=pathoAD, fill=pathoAD, y=ln.mu)) +
+        geom_boxplot(fill="white", width=.1, size=.5, colour="gray20", outlier.size=0, outlier.stroke=0) +
+        xlab("case-control label") + ylab("adjusted expression (log)") +
+        geom_jitter(width=.1, size=1, pch=21, stroke=.5) +
+        theme(title = element_text(size=8)) +
+        ggtitle(.title)
+
+    .aes <- aes(x=np_sqrt, y=ln.mu,
+                ymin = ln.mu - ln.mu.sd,
+                ymax = ln.mu + ln.mu.sd)
+
+    p2 <-
+        .plot(.eg.dt, .aes) +
+        xlab("Amyloid-beta protein (sqrt)") + ylab("adjusted expression (log)") +
+        geom_linerange(aes(colour = pathoAD), size = .2) +
+        geom_point(aes(colour = pathoAD, fill = pathoAD), size=1.5, pch=21) +
+        geom_smooth(method="lm", se=FALSE, size=.2, formula=y~x, colour="red") +
+        ggpubr::stat_cor(label.x.npc="left", label.y.npc="bottom", size=2)
+
+    .aes <- aes(x=nft_sqrt, y=ln.mu,
+                ymin = ln.mu - ln.mu.sd,
+                ymax = ln.mu + ln.mu.sd)
+
+    p3 <-
+        .plot(.eg.dt, .aes) +
+        xlab("Tau protein (sqrt)") + ylab("adjusted expression (log)") +
+        geom_linerange(aes(colour = pathoAD), size = .2) +
+        geom_point(aes(colour = pathoAD, fill = pathoAD), size=1.5, pch=21) +
+        geom_smooth(method="lm", se=FALSE, size=.2, formula=y~x, colour="red") +
+        ggpubr::stat_cor(label.x.npc="left", label.y.npc="bottom", size=2)
+
+    .aes <- aes(x=apoe.e4, y=ln.mu,
+                ymin = ln.mu - ln.mu.sd,
+                ymax = ln.mu + ln.mu.sd)
+
+    p1/p2/p3
+}
+
+#' @param .eg.dt
+show.gene.comparison <- function(.eg.dt) {
+
+    .eg.dt <- .eg.dt %>%
+        left_join(pheno.dt, by = "projid") %>% 
+        mutate(pathoAD = factor(pathoAD, c(0,1), c("non-AD", "AD")))
+
+    .add.stat <- function(plt) {
+        plt +
+            geom_boxplot(fill="white", width=.2, outlier.size=0, outlier.stroke=0) +
+            xlab("case-control label") + 
+            geom_jitter(width=.1, size=1, pch=21, stroke=.5) +
+            ggpubr::stat_compare_means(size = 2) +
+            theme(legend.position="bottom") +
+            scale_color_manual(values=c("gray40", "#7022A7")) +
+            scale_fill_manual(values=c("white", "#7022A7"))    
+    }
+
+    p1 <-
+        .gg.plot(.eg.dt, aes(x = pathoAD, y = ln.mu, fill = pathoAD)) %>% 
+        .add.stat +
+        ylab("adjusted expression (log-scale)")
+    
+    p2 <-
+        .gg.plot(.eg.dt, aes(x = pathoAD, y = log(1 + tot), fill = pathoAD)) %>% 
+        .add.stat +
+        ylab("total expression log(1+x)")
+
+    p3 <-
+        .gg.plot(.eg.dt, aes(x = pathoAD, y = log(1 + avg), fill = pathoAD)) %>% 
+        .add.stat +
+        ylab("average expression log(1+x)")
+
+
+    p1 | p2 | p3
+}
+```
+
+```{r include = FALSE}
+plot.genome <- function(.ct) {
+
+    .dt <- cocoa.dt[ct == .ct]
+
+    .aes <- aes(x = transcription_start_site, y = t.stat)
+
+    .dt.lab <-
+        .dt[order(.dt$wilcox.pv),
+            head(.SD, 3),
+            by = .(chromosome_name)] %>%
+        filter(qv < .1)
+
+    .gg.plot(.dt, .aes) +
+        geom_hline(yintercept = 0, size = .2) +
+        facet_grid(.~as.integer(chromosome_name), space="free", scales="free") +
+        geom_point(colour = "gray", size=.2) +
+        ggrepel::geom_text_repel(aes(label=gene), data = .dt.lab, size = 2, segment.size=.1) +
+        geom_point(aes(fill = t.stat), data = .dt.lab, size = 1, pch = 21, stroke = .1) +
+        scale_x_continuous(labels = function(x) round(x/1e6)) +
+        scale_fill_gradient2("t-statistic", low="blue", high="red") +
+        xlab("Transcription start site (genomic location Mb)") +
+        ylab("Gene-level differential effect") +
+        theme(legend.position = "bottom", axis.text.x = element_text(angle=90, vjust=1, hjust=1))
+}
+```
+
+```{r include = FALSE}
+select.genes <- function(.ct, fdr.cutoff = 0.01) {
+    cocoa.dt[ct == .ct & qv < fdr.cutoff] %>%
+    arrange(wilcox.pv) %>%
+    select(gene) %>%
+    unlist %>%
+    as.character
+}
+```
+
+### Why do we find more genes with CoCoA?
+
+#### Take the examples of Microglia genes
+
+```{r include = FALSE}
+pheno.dt <- read.pheno()
+local.dt <- .read.cocoa("Microglia_1")
+cf.pheno <- 
+    pheno.dt[, .(projid, np_sqrt, nft_sqrt, cogn_ep_random_slope,
+                 pathoAD, msex, educ, age_death, apoe.e4)]
+
+cf.dt <- .read.cf("Microglia_1")
+
+cf.stat <- take.assoc.stat(cf.dt, cf.pheno, log.trans=TRUE)
+```
+
+```{r Fig_Example_CF_Assoc, fig.width=4, fig.height = 2.5}
+
+.temp <- 
+    cocoa.dt[ct == "Microglia" & qv < .1, .(gene)] %>%
+    left_join(cf.stat, by = "gene") %>%
+    filter(p.val < 0.05)
+
+cf.stat.show <- cf.stat[gene %in% .temp$gene] %>% 
+    mutate(row = pheno, col = gene, weight = -log10(p.val)) %>%
+    order.pair(ret.tab = TRUE)
+    
+plt <- 
+    .gg.plot(cf.stat.show, aes(y = row, x = col, fill = weight)) +
+    geom_tile() +
+    geom_text(data=cf.stat.show[p.val < .05], label="*") +
+    theme(axis.text.x = element_text(angle=90, vjust=1, hjust=1)) +
+    theme(legend.position = "bottom") +
+    xlab("genes") + ylab("covariates") +
+    scale_fill_distiller("p-value",
+                         palette = "RdPu", direction = 1,
+                         labels = function(x) num.sci(10^(-x)))
+
+print(plt)
+```
+
+
+
+```{r Fig_Example_APOE_VS, fig.width = 6, fig.height = 2}
+show.gene.comparison(local.dt[gene == "APOE"])
+```
+
+```{r Fig_Example_APOE_CF, fig.width = 2, fig.height = 2}
+
+.eg.dt <- cf.dt[gene == "APOE"]
+
+.eg.dt <- .eg.dt %>%
+    left_join(pheno.dt, by = "projid") %>%
+    mutate(msex = factor(msex, c(0,1), c("Female","Male")))
+
+.aes <- aes(x = msex, y = log(1 + cf), fill = msex)
+
+plt <- 
+    .gg.plot(.eg.dt, .aes) +
+    ggtitle("APOE") +
+    geom_boxplot(fill="white", width=.2, outlier.size=0, outlier.stroke=0) +
+    xlab("Sex") + ylab("confounding effect (log)") +
+    geom_jitter(width=.1, size=1, pch=21, stroke=.5) +
+    ggpubr::stat_compare_means(size = 2) +
+    theme(legend.position="bottom") +
+    scale_fill_manual(values=c("#FF6666", "#6666FF"), guide = FALSE)
+
+print(plt)
+```
+
+
+```{r Fig_Example_APOE_Pheno, fig.width=2, fig.height=6}
+show.one.gene(local.dt[gene == "APOE"], cocoa.dt[gene == "APOE" & ct == "Microglia"])
+```
+
+
+
+### Genomic views
+
+
+```{r Fig_Genomic, fig.width=8, fig.height=2, results="asis"}
+for(.ct in ct.names) {
+    plt <- plot.genome(.ct)
+    print(plt)
+    .file <- fig.dir %&% "/Fig_Genomic_" %&% .ct %&% ".pdf"
+    cat("\n\n[" %&% .ct %&% "](" %&% .file %&% ")\n\n")
+    .gg.save(.file, plot=plt, width=8, height=2)
+
+    local.dt <- .read.cocoa(.ct %&% "_1")
+    .top.genes <- select.genes(.ct, 1) %>% head(5)
+
+    p.list <-
+        lapply(.top.genes,
+               function(g) {
+                   eg.dt <- local.dt %>% filter(gene == g)
+                   show.one.gene(eg.dt, cocoa.dt[gene == g & ct == .ct])
+               })
+    
+    plt <- wrap_plots(p.list, nrow = 1)
+    .file <- fig.dir %&% "/Fig_Genomic_Top_" %&% .ct %&% ".pdf"
+    cat("\n\n[" %&% .ct %&% " top genes](" %&% .file %&% ")\n\n")
+    .gg.save(.file, plot=plt, width=10, height=6)    
+}
+```
+
+### Gene ontology enrichment
+
+```{r include=FALSE}
+test.go.enrichment <- function(.dt, .go.tab, fdr.cutoff = NULL, ntop = NULL) {
+
+    x.genes <- .dt$ensembl_gene_id %>% unique
+    y.genes <- .go.tab$ensembl_gene_id %>% unique
+    .genes <- intersect(x.genes, y.genes)
+
+    ntot <- length(.genes)
+
+    .temp <-
+        .dt[, .(pv = min(wilcox.pv),
+                qv = min(qv),
+                t = mean(t.stat)),
+            by = .(ensembl_gene_id)]
+
+    if(!is.null(fdr.cutoff)) {
+        pv.cutoff <- .temp[qv <= fdr.cutoff, .(pv)] %>%
+            unlist %>%
+            max
+    }
+
+    if(is.null(fdr.cutoff) & !is.null(ntop)) {
+        pv.cutoff <- .temp %>%
+            top_n(ntop, -log10(pv)) %>% 
+            select(pv) %>% 
+            unlist %>%
+            max
+    }
+
+    ndrawn <- .temp[pv < pv.cutoff] %>% nrow
+
+    .merged <- merge(.temp, .go.tab)
+
+    ret <-
+        .merged[, .(n.white = .N,
+                   n.black = ntot - .N,
+                   n.w.drawn = sum(pv < pv.cutoff),
+                   n.drawn = ndrawn),
+               by = .(namespace_1003, go_id, name_1006)]
+
+    ret[n.white >= 5 & n.white <= 500,
+        pv := phyper(q = pmax(n.w.drawn - 1, 0),
+                     m = n.white,
+                     n = n.black,
+                     k = n.drawn,
+                     lower.tail=FALSE)
+        ]
+
+    ret[n.white >= 5 & n.white <= 500,
+        qv := p.adjust(pv, "fdr"),
+        by = .(namespace_1003)]
+
+    ret[n.white >= 5 & n.white <= 500,
+        fwer := p.adjust(pv, "holm"),
+        by = .(namespace_1003)]
+
+    ret <- ret[str_length(name_1006) > 0 & n.w.drawn > 0]
+
+    return(ret)
+}
+```
+
+```{r include = FALSE}
+go.result <-
+    test.go.enrichment(cocoa.dt,
+                       gene.ontology$go,
+                       fdr.cutoff = .1)
+```
+
+```{r Fig_GO_Enrichment, fig.width=6, fig.height=3.5}
+ntop <- 20
+.dt <- go.result
+
+.dt <- .dt %>% arrange(pv) %>% head(ntop)
+
+.cutoff <- .dt[qv < .2, .(pv)] %>% unlist %>% max
+
+.dt <- .dt %>%
+    mutate(row = factor(name_1006, rev(.dt$name_1006)))
+
+.aes <- aes(y = row, yend = row,
+            x = 0, xend = -log10(pv),
+            label = "(" %&% n.w.drawn %&% " / " %&% n.white %&% ")")
+
+plt <-
+    .gg.plot(.dt, .aes) +
+    scale_x_continuous("p-value", labels=function(x) num.sci(10^(-x))) +
+    ylab("Gene ontology") +
+    geom_segment(colour="gray50", size=3) +
+    geom_vline(xintercept = -log10(.cutoff), size = .5, colour="purple") +
+    geom_text(aes(x = 2), size=2, colour = "white")
+
+print(plt)
+.file <- fig.dir %&% "/Fig_GO_Enrichment.pdf"
+.gg.save(.file, plot=plt, width = 6, height = 3.5)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```

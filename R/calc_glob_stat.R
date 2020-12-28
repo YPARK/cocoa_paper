@@ -1,22 +1,27 @@
 #!/usr/bin/env Rscript
 
-ln.mu.file <- "result/cocoa/Microglia_1.ln_resid_mu.gz"
+ln.mu.file <- "result/cocoa/Microglia_1.boot_ln_mu.gz"
 col.file <- "result/cocoa/Microglia_1.mu_cols.gz"
-sum.file  <- "result/aggregate/Microglia.sum.gz"
-mean.file  <- "result/aggregate/Microglia.mean.gz"
-sum.col.file  <- "result/aggregate/Microglia.mu_cols.gz"
+sum.file  <- "result/aggregate/Microglia_1.sum.gz"
+mean.file  <- "result/aggregate/Microglia_1.mean.gz"
+sum.col.file  <- "result/aggregate/Microglia_1.mu_cols.gz"
 row.file <- "data/brain_2018-05-03/features.tsv.gz"
 pheno.file <- "result/phenotyped.txt.gz"
 
 argv <- commandArgs(trailingOnly = TRUE)
 
+if(length(argv) != 8) {
+    q()
+}
+
 ln.mu.file   <- argv[1] # "Microglia.ln_resid_mu.gz"
 col.file     <- argv[2] # "Microglia.mu_cols.gz"
 sum.file     <- argv[3] # "Microglia.sum.gz"
-sum.col.file <- argv[4] # "Microglia.mu_cols.gz"
-row.file     <- argv[5] # "genes.rows.gz"
-pheno.file   <- argv[6] # "clinical.csv"
-out.file     <- argv[7]
+mean.file    <- argv[4] # "Microglia.sum.gz"
+sum.col.file <- argv[5] # "Microglia.mu_cols.gz"
+row.file     <- argv[6] # "genes.rows.gz"
+pheno.file   <- argv[7] # "clinical.csv"
+out.file     <- argv[8]
 
 ################################################################
 
@@ -43,27 +48,33 @@ library(data.table)
     return(ret)
 }
 
-run.t.test <- function(gg, xx, yy) {
+run.test <- function(gg, xx, yy, max.mean.na = .3) {
 
-    x.obs <- apply(t(!is.na(xx)), 2, mean)
-    y.obs <- apply(t(!is.na(xx)), 2, mean)
+    x.missing <- apply(t(is.na(xx)), 2, mean)
+    y.missing <- apply(t(is.na(yy)), 2, mean)
 
-    .valid <- which(x.obs > .5 & y.obs > .5)
+    .valid <- which(x.missing <= max.mean.na & y.missing <= max.mean.na)
 
-    .t.test <- lapply(.valid, function(j) t.test(yy[j, ], xx[j, ]))
-    
+    .wilcox.test <- lapply(.valid, function(j) { wilcox.test(yy[j, ], xx[j, ]) })
+
+    pv <- sapply(.wilcox.test, function(x) x$p.value)
+    tt <- sapply(.wilcox.test, function(x) x$statistic)
+
+    ret <- gg[.valid, ] %>%
+        mutate(wilcox.pv = pv, wilcox.stat = tt) %>% as.data.table
+
+    .t.test <- lapply(.valid, function(j) { t.test(yy[j, ], xx[j, ]) })
+
     pv <- sapply(.t.test, function(x) x$p.value)
     tt <- sapply(.t.test, function(x) x$statistic)
     se <- sapply(.t.test, function(x) x$stderr)
 
-    gg[.valid, ] %>%
-        mutate(pv = pv, t = tt, se = se)
-
+    ret <- ret %>%
+        mutate(missing.1 = y.missing[.valid]) %>% 
+        mutate(missing.0 = x.missing[.valid]) %>% 
+        mutate(t.pv = pv, t.stat = tt, t.se = se) %>%
+        as.data.table
 }
-
-.pheno <- fread(pheno.file, header=TRUE) %>%
-    select(-TAG) %>%
-    distinct
 
 .read.cocoa <- function(...){
 
@@ -75,52 +86,59 @@ run.t.test <- function(gg, xx, yy) {
     return(.fread.melt(..., rows = rows$gene, cols = cols$projid))
 }
 
-
 .read.sum <- function(...){
 
     rows <- fread(row.file, header = FALSE, col.names = "gene")
     cols <- fread(sum.col.file, header = FALSE, col.names = "sample")
-    cols[, c("projid", "celltype") := tstrsplit(sample, "_")]
+    cols[, c("projid", "celltype", "pheno.col") := tstrsplit(sample, "_")]
     cols[, projid := as.integer(projid)]
 
     return(.fread.melt(..., rows = rows$gene, cols = cols$projid))
 }
 
+.pheno.col <-
+    basename(ln.mu.file) %>%
+    str_split(pattern="[.]", simplify=TRUE) %>%
+    (function(x) x[1]) %>%
+    str_split(pattern="[_]", simplify=TRUE) %>%
+    (function(x) x[2]) %>%
+    as.integer
 
+.pheno <- fread(pheno.file, header=TRUE, na.strings="-9") %>%
+    select(-TAG) %>%
+    distinct %>%
+    as.data.frame
 
-stat.dt <- 
+.pheno.name <- names(.pheno)[1 + .pheno.col]
+
+.pheno <- .pheno[, c(1, .pheno.col + 1)] %>%
+    (function(x) { colnames(x) <- c("projid", "pheno"); x })
+
+stat.dt <-
     .read.cocoa(ln.mu.file, "ln.mu") %>%
     left_join(.read.sum(sum.file, "tot"), by = c("gene", "projid")) %>%
     left_join(.read.sum(mean.file, "avg"), by = c("gene", "projid")) %>%
-    left_join(.pheno, by = "projid") %>%
+    left_join(.pheno) %>%
     as.data.table
 
-.xx <- stat.dt %>%
-    filter(gene == "APOE") %>%
-    arrange(ln.mu)
+test.all.genes <- function(.var, tot.cutoff = 1) {
 
-.xx
+    .glob.dt <- dcast(stat.dt[tot >= tot.cutoff],
+                      gene ~ pheno + projid, value.var = .var)
 
+    gg <- .glob.dt %>% select(gene) %>% as_tibble
+    xx <- .glob.dt %>% select(starts_with("0_")) %>% as.matrix
+    yy <- .glob.dt %>% select(starts_with("1_")) %>% as.matrix
 
-t.test(.xx[pathoAD==1]$ln.mu, .xx[pathoAD==0]$ln.mu)
+    run.test(gg, xx, yy)
+}
 
-ggplot(.xx, aes(x=as.factor(pathoAD), y = ln.mu)) +
-    geom_boxplot()
+.ret.1 <- test.all.genes("ln.mu") %>% mutate(method = "cocoa")
+.ret.2 <- test.all.genes("avg") %>% mutate(method = "avg")
+.ret.3 <- test.all.genes("tot") %>% mutate(method = "tot")
 
-t.test(.xx[pathoAD==1]$avg, .xx[pathoAD==0]$avg)
+ret <- rbind(.ret.1, .ret.2, .ret.3) %>%
+    mutate(pheno = .pheno.name) %>%
+    as.data.table
 
-ggplot(.xx, aes(x=as.factor(pathoAD), y = log(avg))) +
-    geom_boxplot()
-
-
-
-
-.glob.dt <- dcast(stat.dt[tot > 0], hgnc + ensg ~ pathoAD + projid, value.var = "ln.mu")
-
-gg <- .glob.dt %>% select(ensg, hgnc) %>% as_tibble
-xx <- .glob.dt %>% select(starts_with("0_")) %>% as.matrix
-yy <- .glob.dt %>% select(starts_with("1_")) %>% as.matrix
-
-patho.test.dt <- run.t.test(gg, xx, yy)
-
-write_tsv(patho.test.dt, file = out.file)
+fwrite(ret, file = out.file, sep = "\t", row.names = FALSE, col.names = TRUE)
