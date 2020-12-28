@@ -105,9 +105,8 @@ result/glob_stat/%.stat.gz: R/calc_glob_stat.R result/cocoa/%.boot_ln_mu.gz resu
 RMD := $(wildcard *.rmd)
 HTML := $(RMD:.rmd=.html)
 PDF := $(RMD:.rmd=.pdf)
-DOCX := $(RMD:.rmd=.docx)
 
-doc: $(HTML) $(DOCX) $(PDF)
+doc: $(HTML) $(PDF)
 
 %.html: %.rmd $(COMMON)
 	Rscript -e "library(rmarkdown); render('$<');"

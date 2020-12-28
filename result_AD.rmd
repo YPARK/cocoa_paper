@@ -613,16 +613,22 @@ plt <-
                          labels = function(x) num.sci(10^(-x)))
 
 print(plt)
+.file <- fig.dir %&% "/Fig_Example_CF_Assoc.pdf"
+.gg.save(.file, plot=plt, width = 4, height = 2.5)
 ```
 
-
-
 ```{r Fig_Example_APOE_VS, fig.width = 6, fig.height = 2}
-show.gene.comparison(local.dt[gene == "APOE"])
+plt <- show.gene.comparison(local.dt[gene == "APOE"])
+print(plt)
+.file <- fig.dir %&% "/Fig_Example_APOE_VS.pdf"
+.gg.save(.file, plot=plt, width = 6, height = 2)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
 ```{r Fig_Example_APOE_CF, fig.width = 2, fig.height = 2}
-
 .eg.dt <- cf.dt[gene == "APOE"]
 
 .eg.dt <- .eg.dt %>%
@@ -642,13 +648,26 @@ plt <-
     scale_fill_manual(values=c("#FF6666", "#6666FF"), guide = FALSE)
 
 print(plt)
+.file <- fig.dir %&% "/Fig_Example_APOE_CF.pdf"
+.gg.save(.file, plot=plt, width = 2, height = 2)
 ```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
 
 
 ```{r Fig_Example_APOE_Pheno, fig.width=2, fig.height=6}
-show.one.gene(local.dt[gene == "APOE"], cocoa.dt[gene == "APOE" & ct == "Microglia"])
+plt <- show.one.gene(local.dt[gene == "APOE"], cocoa.dt[gene == "APOE" & ct == "Microglia"])
+print(plt)
+.file <- fig.dir %&% "/Fig_Example_APOE_Pheno.pdf"
+.gg.save(.file, plot=plt, width = 2, height = 6)
 ```
 
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
 
 
 ### Genomic views
