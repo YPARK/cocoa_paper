@@ -64,7 +64,7 @@ marker.genes <- .fread("data/PsychENCODE.marker",
     marker.genes %>%
     mutate(row = factor(celltype, .marker.order$ro)) %>% 
     mutate(col = factor(geneSymbol, .marker.order$co))
-    
+
 plt <-
     .gg.plot(.df, aes(y=row, x=col)) +
     geom_tile() +
@@ -279,8 +279,8 @@ gene.name.file <- "data/brain_2018-05-03/filtered_gene_row_names.txt.gz"
     .ret[, gene := .rows]
 
     melt.data.table(.ret, id.vars = "gene",
-                           variable.name = "col",
-                           value.name = .name)
+                    variable.name = "col",
+                    value.name = .name)
 }
 
 .read.cf <- function(ct.code) {
@@ -375,7 +375,8 @@ n.fdr01.ct.genes <- cocoa.dt[qv < .01, .(n=length(unique(gene))), by=.(ct)] %>%
 .aes <-
     aes(x=-log10(wilcox.pv.avg), y=-log10(wilcox.pv.cocoa), fill=ct)
 
-.gg.plot(.dt, .aes) +
+plt <-
+    .gg.plot(.dt, .aes) +
     xlab("Wilcoxon test p-values on the average pseudo-bulk (-log10)") +
     ylab("Wilcoxon test p-values on\n the CoCoA pseudo-bulk  (-log10)") +
     facet_wrap(~ct, nrow=1) +
@@ -386,13 +387,15 @@ n.fdr01.ct.genes <- cocoa.dt[qv < .01, .(n=length(unique(gene))), by=.(ct)] %>%
     scale_fill_manual(values=rev(.marker.order$col), guide=FALSE)
 
 .file <- fig.dir %&% "/Fig_cocoa_vs_avg.pdf"
+print(plt)
 .gg.save(.file, plot=plt, width = 8, height = 2)
 cat("\n\n[PDF](" %&% .file %&% ")\n\n")
 
 .aes <-
     aes(x=-log10(wilcox.pv.tot), y=-log10(wilcox.pv.cocoa), fill=ct)
 
-.gg.plot(.dt, .aes) +
+plt <-
+    .gg.plot(.dt, .aes) +
     xlab("Wilcoxon test p-values on the total pseudo-bulk (-log10)") +
     ylab("Wilcoxon test p-values on\n the CoCoA pseudo-bulk  (-log10)") +
     facet_wrap(~ct, nrow=1) +
@@ -403,13 +406,15 @@ cat("\n\n[PDF](" %&% .file %&% ")\n\n")
     scale_fill_manual(values=rev(.marker.order$col), guide=FALSE)
 
 .file <- fig.dir %&% "/Fig_cocoa_vs_tot.pdf"
+print(plt)
 .gg.save(.file, plot=plt, width = 8, height = 2)
 cat("\n\n[PDF](" %&% .file %&% ")\n\n")
 
 .aes <-
     aes(x=-log10(wilcox.pv.tot), y=-log10(wilcox.pv.avg), fill=ct)
 
-.gg.plot(.dt, .aes) +
+plt <-
+    .gg.plot(.dt, .aes) +
     xlab("Wilcoxon test p-values on the total pseudo-bulk (-log10)") +
     ylab("Wilcoxon test p-values on \nthe average pseudo-bulk (-log10)") +
     facet_wrap(~ct, nrow=1) +
@@ -421,6 +426,7 @@ cat("\n\n[PDF](" %&% .file %&% ")\n\n")
 
 .file <- fig.dir %&% "/Fig_avg_vs_tot.pdf"
 .gg.save(.file, plot=plt, width = 8, height = 2)
+print(plt)
 cat("\n\n[PDF](" %&% .file %&% ")\n\n")
 ```
 
@@ -567,10 +573,10 @@ plot.genome <- function(.ct) {
 ```{r include = FALSE}
 select.genes <- function(.ct, fdr.cutoff = 0.01) {
     cocoa.dt[ct == .ct & qv < fdr.cutoff] %>%
-    arrange(wilcox.pv) %>%
-    select(gene) %>%
-    unlist %>%
-    as.character
+        arrange(wilcox.pv) %>%
+        select(gene) %>%
+        unlist %>%
+        as.character
 }
 ```
 
@@ -600,7 +606,7 @@ cf.stat <- take.assoc.stat(cf.dt, cf.pheno, log.trans=TRUE)
 cf.stat.show <- cf.stat[gene %in% .temp$gene] %>% 
     mutate(row = pheno, col = gene, weight = -log10(p.val)) %>%
     order.pair(ret.tab = TRUE)
-    
+
 plt <- 
     .gg.plot(cf.stat.show, aes(y = row, x = col, fill = weight)) +
     geom_tile() +
@@ -670,8 +676,57 @@ cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
 
-### Genomic views
+### A genomic view combining all the cell types
 
+```{r Fig_Genomic_combined, fig.width=8, fig.height=2, results="asis"}
+plot.genome.combined <- function(fwer.cutoff = 0.01) {
+    .aes <- aes(x = transcription_start_site, y = t.stat, fill = ct, label = gene)
+
+    .dt.show <- cocoa.dt %>% 
+        mutate(ct = factor(ct, rev(.marker.order$ro)))
+
+    .dt.lab <- .dt.show[fwer < fwer.cutoff]    
+
+    .genome.scale <- scale_x_continuous(breaks = seq(0,1e9,25e6),
+                                        labels = function(x) round(x/1e6))
+    
+    .gg.plot(.dt.show, .aes) +
+        facet_grid(.~as.integer(chromosome_name), space="free", scales="free") +
+        geom_point(colour = "gray", size=.5, stroke = 0) +
+        geom_hline(yintercept = 0, size = .2) +
+        geom_point(data = .dt.lab, size = 2, pch = 21, stroke = .1) +
+        geom_text_repel(data = .dt.lab, size = 2, segment.size=.1, colour="gray20") +
+        .genome.scale +
+        xlab("Transcription start site (genomic location Mb)") +
+        ylab("Gene-level differential effect") +
+        scale_fill_manual("cell type", values = rev(.marker.order$col)) +
+        theme(legend.position = "bottom",
+              axis.text.x = element_text(angle=90, vjust=1, hjust=1))
+}
+
+plt <- plot.genome.combined()
+print(plt)
+.file <- fig.dir %&% "/Fig_Genomic_combined.pdf"
+.gg.save(.file, plot=plt, width=8, height=2)
+cat("\n\n[Combined genomic view](" %&% .file %&% ")\n\n")
+
+for(.ct in ct.names) {
+    .genes <- cocoa.dt[fwer < .01 & ct == .ct, .(gene, ct)]
+    if(nrow(.genes) > 0) {
+        local.dt <- left_join(.genes, .read.cocoa(.ct %&% "_1"), by = c("gene", "ct"))
+        for(g in .genes$gene) {
+            eg.dt <- local.dt[gene == g]
+            plt <- show.one.gene(eg.dt, cocoa.dt[gene == g & ct == .ct])
+            .file <- fig.dir %&% "/Fig_Genomic_" %&% .ct %&% "_" %&% g %&% ".pdf"
+            .gg.save(.file, plot=plt, width=2, height=6)
+            cat("\n* [" %&% g %&% " @ " %&% .ct %&% "](" %&% .file %&% ")\n")
+        }
+    }
+}
+```
+
+
+### Genomic views for each cell type
 
 ```{r Fig_Genomic, fig.width=8, fig.height=2, results="asis"}
 for(.ct in ct.names) {
@@ -701,7 +756,11 @@ for(.ct in ct.names) {
 ### Gene ontology enrichment
 
 ```{r include=FALSE}
-test.go.enrichment <- function(.dt, .go.tab, fdr.cutoff = NULL, ntop = NULL) {
+test.go.enrichment <- function(.dt, .go.tab,
+                               fdr.cutoff = NULL,
+                               ntop = NULL,
+                               direction = NULL,
+                               .ct = NULL) {
 
     x.genes <- .dt$ensembl_gene_id %>% unique
     y.genes <- .go.tab$ensembl_gene_id %>% unique
@@ -709,11 +768,21 @@ test.go.enrichment <- function(.dt, .go.tab, fdr.cutoff = NULL, ntop = NULL) {
 
     ntot <- length(.genes)
 
-    .temp <-
-        .dt[, .(pv = min(wilcox.pv),
-                qv = min(qv),
-                t = mean(t.stat)),
-            by = .(ensembl_gene_id)]
+    if(is.null(.ct)) {
+        .temp <-
+            .dt[, .(pv = min(wilcox.pv),
+                    qv = min(qv),
+                    tt = mean(t.stat)),
+                by = .(ensembl_gene_id)] %>%
+            mutate(ct = "combined")
+    } else {
+        .temp <-
+            .dt[order(.dt$wilcox.pv),
+                head(.SD, 1),
+                by = .(ensembl_gene_id)] %>%
+            rename(pv = wilcox.pv) %>%
+            rename(tt = t.stat)
+    }
 
     if(!is.null(fdr.cutoff)) {
         pv.cutoff <- .temp[qv <= fdr.cutoff, .(pv)] %>%
@@ -729,16 +798,27 @@ test.go.enrichment <- function(.dt, .go.tab, fdr.cutoff = NULL, ntop = NULL) {
             max
     }
 
-    ndrawn <- .temp[pv < pv.cutoff] %>% nrow
+    .dir <- function(x) {
+        if(is.null(direction)) return(rep(TRUE, length(x)))
+        if(direction > 0) return(x > 0)
+        if(direction < 0) return(x < 0)
+    }
 
-    .merged <- merge(.temp, .go.tab)
+    .sub.ct <- function(x) {
+        if(is.null(.ct)) return(rep(TRUE, length(x)))
+        return(x %in% .ct)
+    }
+
+    ndrawn <- .temp[pv < pv.cutoff & .dir(tt) & .sub.ct(ct)] %>% nrow
+
+    .merged <- merge(.temp, .go.tab, by = "ensembl_gene_id")
 
     ret <-
         .merged[, .(n.white = .N,
-                   n.black = ntot - .N,
-                   n.w.drawn = sum(pv < pv.cutoff),
-                   n.drawn = ndrawn),
-               by = .(namespace_1003, go_id, name_1006)]
+                    n.black = ntot - .N,
+                    n.w.drawn = sum(pv < pv.cutoff & .dir(tt) & .sub.ct(ct)),
+                    n.drawn = ndrawn),
+                by = .(namespace_1003, go_id, name_1006)]
 
     ret[n.white >= 5 & n.white <= 500,
         pv := phyper(q = pmax(n.w.drawn - 1, 0),
@@ -747,6 +827,8 @@ test.go.enrichment <- function(.dt, .go.tab, fdr.cutoff = NULL, ntop = NULL) {
                      k = n.drawn,
                      lower.tail=FALSE)
         ]
+
+    ret[, n.null := n.drawn * n.white / (n.white + n.black)]
 
     ret[n.white >= 5 & n.white <= 500,
         qv := p.adjust(pv, "fdr"),
@@ -795,6 +877,216 @@ plt <-
 print(plt)
 .file <- fig.dir %&% "/Fig_GO_Enrichment.pdf"
 .gg.save(.file, plot=plt, width = 6, height = 3.5)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+### Up-regulated DEGs (`r num.int(cocoa.dt[qv < .1 & t.stat > 0] %>% nrow)` genes)
+
+```{r include = FALSE}
+go.result <-
+    test.go.enrichment(cocoa.dt,
+                       gene.ontology$go,
+                       fdr.cutoff = .1,
+                       direction = 1)
+```
+
+```{r Fig_GO_Enrichment_up, fig.width=6, fig.height=3.5}
+ntop <- 20
+.dt <- go.result
+
+.dt <- .dt %>% arrange(pv) %>% head(ntop)
+
+.cutoff <- .dt[qv < .2, .(pv)] %>% unlist %>% max
+
+.dt <- .dt %>%
+    mutate(row = factor(name_1006, rev(.dt$name_1006)))
+
+.aes <- aes(y = row, yend = row,
+            x = 0, xend = -log10(pv),
+            label = "(" %&% n.w.drawn %&% " / " %&% n.white %&% ")")
+
+plt <-
+    .gg.plot(.dt, .aes) +
+    scale_x_continuous("p-value", labels=function(x) num.sci(10^(-x))) +
+    ylab("Gene ontology") +
+    geom_segment(colour="gray50", size=3) +
+    geom_vline(xintercept = -log10(.cutoff), size = .5, colour="purple") +
+    geom_text(aes(x = 2), size=2, colour = "white")
+
+print(plt)
+.file <- fig.dir %&% "/Fig_GO_Enrichment_up.pdf"
+.gg.save(.file, plot=plt, width = 6, height = 3.5)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+### Down-regulated DEGs (`r num.int(cocoa.dt[qv < .1 & t.stat < 0] %>% nrow)` genes)
+
+```{r include = FALSE}
+go.result <-
+    test.go.enrichment(cocoa.dt,
+                       gene.ontology$go,
+                       fdr.cutoff = .1,
+                       direction = -1)
+```
+
+```{r Fig_GO_Enrichment_down, fig.width=6, fig.height=3.5}
+ntop <- 20
+.dt <- go.result
+
+.dt <- .dt %>% arrange(pv) %>% head(ntop)
+
+.cutoff <- .dt[qv < .2, .(pv)] %>% unlist %>% max
+
+.dt <- .dt %>%
+    mutate(row = factor(name_1006, rev(.dt$name_1006)))
+
+.aes <- aes(y = row, yend = row,
+            x = 0, xend = -log10(pv),
+            label = "(" %&% n.w.drawn %&% " / " %&% n.white %&% ")")
+
+plt <-
+    .gg.plot(.dt, .aes) +
+    scale_x_continuous("p-value", labels=function(x) num.sci(10^(-x))) +
+    ylab("Gene ontology") +
+    geom_segment(colour="gray50", size=3) +
+    geom_vline(xintercept = -log10(.cutoff), size = .5, colour="purple") +
+    geom_text(aes(x = 2), size=2, colour = "white")
+
+print(plt)
+.file <- fig.dir %&% "/Fig_GO_Enrichment_down.pdf"
+.gg.save(.file, plot=plt, width = 6, height = 3.5)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+### GO enrichment for each cell type
+
+```{r include=FALSE}
+plot.go.heatmap <- function(go.ct.dt, fdr.cutoff = .1) {
+
+    go.show <- go.ct.dt[qv < fdr.cutoff, .(name_1006)] %>% unique
+
+    .dt <- merge(go.show, go.ct.dt) %>%
+        mutate(row = ct, col = name_1006, weight = -log10(pv)) %>% 
+        col.order(.ro = rev(.marker.order$ro), ret.tab = TRUE) %>%
+        as.data.table
+
+    .aes <- aes(y = col, x = row,
+                size = -log10(pv),
+                fill = log10(n.w.drawn))
+
+    .scale.fill <-
+        scale_fill_distiller("#genes",
+                             palette = "RdPu",
+                             direction = 1,
+                             labels=function(x) round(10^(x)))
+
+    .scale.size <-
+        scale_size_continuous("p-value",
+                              breaks = seq(0,10,2),
+                              range=c(0, 3),
+                              labels=function(x) num.sci(10^(-x)))
+
+    .gg.plot(.dt, .aes) +
+        theme(axis.text.x = element_text(angle=90, vjust=1, hjust=1)) +
+        theme(legend.key.width = unit(.2, "lines")) +
+        theme(legend.key.height = unit(.5, "lines")) +
+        geom_point(pch = 22, stroke=.2) +
+        .scale.fill +
+        xlab("cell type") + ylab("gene ontology") +
+        .scale.size
+}
+
+measure.size <- function(go.ct.dt, fdr.cutoff) {
+    .nrow <- length(unique(go.ct.dt[qv < fdr.cutoff]$name_1006))
+    .ncol <- length(unique(go.ct.dt[qv < fdr.cutoff]$ct))
+    .lab <- max(sapply(go.ct.dt[qv < fdr.cutoff]$name_1006, nchar))
+
+    list(w = (.lab * .055 + .ncol * .15 + 1),
+         h = ceiling(.1 * .nrow + .5))
+}
+```
+
+#### DEGs combined
+
+```{r Fig_GO_Enrichment_CT_combined, fig.width=4.835, fig.height=2}
+go.ct.dt <-
+    lapply(ct.names, function(.ct) {
+        test.go.enrichment(cocoa.dt,
+                           gene.ontology$go,
+                           fdr.cutoff = .1,
+                           .ct = .ct) %>% 
+            mutate(ct = .ct)
+    }) %>%
+    do.call(what=rbind) %>% 
+    filter(n.w.drawn > 1)
+
+plt <- plot.go.heatmap(go.ct.dt, .1)
+print(plt)
+.file <- fig.dir %&% "/Fig_GO_Enrichment_CT_combined.pdf"
+.sz <- measure.size(go.ct.dt, .1)
+.gg.save(.file, plot=plt, width = .sz$w, height = .sz$h)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+
+#### DEGs up-regulated
+
+```{r Fig_GO_Enrichment_CT_up, fig.width=5.435, fig.height=4}
+go.ct.dt <-
+    lapply(ct.names, function(.ct) {
+        test.go.enrichment(cocoa.dt,
+                           gene.ontology$go,
+                           fdr.cutoff = .1,
+                           .ct = .ct,
+                           direction = 1) %>% 
+            mutate(ct = .ct)
+    }) %>%
+    do.call(what=rbind) %>%
+    filter(n.w.drawn > 1)
+
+plt <- plot.go.heatmap(go.ct.dt, .1)
+print(plt)
+.file <- fig.dir %&% "/Fig_GO_Enrichment_CT_up.pdf"
+.sz <- measure.size(go.ct.dt, .1)
+.gg.save(.file, plot=plt, width = .sz$w, height = .sz$h)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+#### DEGs down-regulated
+
+```{r Fig_GO_Enrichment_CT_down, fig.width=4.475, fig.height=2}
+go.ct.dt <-
+    lapply(ct.names, function(.ct) {
+        test.go.enrichment(cocoa.dt,
+                           gene.ontology$go,
+                           fdr.cutoff = .1,
+                           .ct = .ct,
+                           direction = -1) %>% 
+            mutate(ct = .ct)
+    }) %>%
+    do.call(what=rbind) %>% 
+    filter(n.w.drawn > 1)
+
+plt <- plot.go.heatmap(go.ct.dt, .1)
+print(plt)
+.file <- fig.dir %&% "/Fig_GO_Enrichment_CT_down.pdf"
+.sz <- measure.size(go.ct.dt, .1)
+.gg.save(.file, plot=plt, width = .sz$w, height = .sz$h)
 ```
 
 ```{r results="asis"}
