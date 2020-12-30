@@ -90,11 +90,15 @@ result/aggregate/%.mean.gz: result/temp/%.mtx.gz result/temp/%.cols.gz result/te
 
 ################################################################
 # Statistical test after adjustment
-GLOB_STAT := $(foreach c, $(CT), $(foreach f, $(pheno_), result/glob_stat/$(c)_$(f).stat.gz))
+GLOB_STAT := $(foreach c, $(CT), $(foreach f, $(pheno_), result/glob_stat/$(c)_$(f).stat.gz result/glob_stat/$(c)_$(f).cf_stat.gz))
 
 step3: $(GLOB_STAT)
 
 result/glob_stat/%.stat.gz: R/calc_glob_stat.R result/cocoa/%.boot_ln_mu.gz result/cocoa/%.mu_cols.gz result/aggregate/%.sum.gz result/aggregate/%.mean.gz result/aggregate/%.mu_cols.gz data/brain_2018-05-03/features.tsv.gz result/phenotyped.txt.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	Rscript --vanilla $^ $@
+
+result/glob_stat/%.cf_stat.gz: R/calc_glob_cf_stat.R result/cocoa/%.cf_mu.gz result/cocoa/%.mu_cols.gz result/aggregate/%.sum.gz result/aggregate/%.mean.gz result/aggregate/%.mu_cols.gz data/brain_2018-05-03/features.tsv.gz result/phenotyped.txt.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	Rscript --vanilla $^ $@
 

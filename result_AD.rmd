@@ -108,7 +108,6 @@ gzip -cd data/brain_2018-05-03/features.tsv.gz | head
 
 
 ```{r Fig_Marker_Weighted, fig.width=6, fig.height=2}
-
 .labels <- .fread("result/celltype.label_names.gz") %>% unlist
 
 .genes <- .fread("result/celltype.marker_names.gz") %>% unlist
@@ -143,57 +142,11 @@ cat("[PDF](" %&% .file %&% ")\n\n")
 ### Basic statistics for cell type annotation
 
 ```{r include = FALSE}
-read.pheno <- function() {
-
-    .apoe.code <- function(x) {
-        if(is.na(x)) return(NA) 
-        if(x == 44) return(2)
-        if(x %in% c(24, 34)) return(1)
-        return(0) 
-    }
-
-    pheno.dt <- fread("data/brain_2018-05-03/phenotypes.csv",
-                      header=TRUE, na.strings = "-9")
-
-    pheno.dt[, apoe.e4 := sapply(apoe_genotype, .apoe.code)]
-    return(pheno.dt)
-}
-
-take.assoc.stat <- function(.dt, .pheno, log.trans = TRUE) {
-    
-    .dt.flat <- dcast(.dt, gene ~ projid, value.var = "cf")
-
-    .xtib <- .dt.flat %>% select(gene) %>% mutate(x.col = 1:n())
-    .mat <- .dt.flat %>% select(-gene) %>% as.matrix
-
-    if(log.trans) {
-        .xx <- t(log(1 + .mat)) %>% scale
-    } else {
-        .xx <- scale(.mat)
-    }
-
-    .yy <-
-        data.table(projid= as.integer(colnames(.mat))) %>%
-        left_join(.pheno, by = "projid") %>%
-        select(-projid) %>%
-        as.matrix
-
-    .ytib <-
-        tibble(pheno = colnames(.yy)) %>%
-        mutate(y.col = 1:n())
-
-    zqtl::calc.qtl.stat(.xx, .yy) %>%
-        left_join(.xtib, by = "x.col") %>%
-        left_join(.ytib, by = "y.col") %>%
-        select(-x.col, -y.col) %>% 
-        as.data.table
-}
-
-.pheno <- fread("data/brain_2018-05-03/filtered_column_metadata.txt.gz")
+.meta <- fread("data/brain_2018-05-03/filtered_column_metadata.txt.gz")
 
 .annot.dt <- .fread("result/celltype.annot.gz",
                     col.names=c("TAG", "ct", "pr", "llik")) %>%
-    left_join(.pheno, by = "TAG") %>% 
+    left_join(.meta, by = "TAG") %>% 
     na.omit %>% 
     as.data.table
 
@@ -254,7 +207,98 @@ print(plt)
 cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
-* `r num.int(round(mean(.tot.i.freq.dt$n)))` cells per individual, including `r paste(.avg.ct.dt$str, collapse=", ")` on average.
+* `r num.int(round(mean(.tot.i.freq.dt$n)))` cells per individual: `r paste(.avg.ct.dt$str, collapse=", ")` on average.
+
+
+### Correlation with the annotations of Mathys _et al._
+
+```{r Fig_cor_with_mathys, fig.width=3, fig.height=3}
+.cor.freq.dt <- .annot.dt[, .(n = .N), by = .(ct, broad.cell.type)] %>% rename(mathys = broad.cell.type)
+.cor.freq.dt[, p := n/sum(n), by = .(ct)]
+.cor.freq.dt[, q := n/sum(n), by = .(mathys)]
+.cor.freq.dt[, ct := factor(ct, rev(c("Ex", "In", "Oligo", "OPC", "Microglia", "Astro", "Per", "Endo")))]
+.cor.freq.dt[, mathys := factor(mathys, c("Ex", "In", "Oli", "Opc", "Mic", "Ast", "Per", "End"))]
+
+plt <-
+    .gg.plot(.cor.freq.dt, aes(y = ct, x = mathys, fill = p)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_distiller("P(Mathys|vMF)", palette = "Blues", direction=1) +
+    theme(legend.position = "bottom") +
+    geom_tile() +
+    geom_text(aes(label = num.int(n)), size = 2) +
+    xlab("Mathys et al.") + ylab("This work (von Mises Fisher)")
+
+print(plt)
+.file <- fig.dir %&% "/Fig_cor_with_mathys.pdf"
+.gg.save(.file, plot=plt, width = 3, height = 3)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+### Marker genes are associated with the AD phenotype
+
+```{r include = FALSE}
+.read.marker.dt <- function(.ct) {
+
+    .stat.file <- "result/glob_stat/" %&% .ct %&% "_1.cf_stat.gz"
+
+    fread(.stat.file, header=TRUE) %>% 
+        filter(gene %in% marker.genes$geneSymbol) %>% 
+        mutate(ct = .ct) %>%
+        as.data.table
+}
+
+ct.names <- c("Ex", "In", "Oligo", "OPC", "Microglia", "Astro", "Per", "Endo")
+
+.marker.assoc.stat <- lapply(ct.names, .read.marker.dt) %>%
+    do.call(what=rbind) %>% 
+    mutate(gene = factor(gene, .marker.order$co)) %>%
+    mutate(ct = factor(ct, rev(ct.names)))
+
+.marker.freq <- .marker.assoc.stat[wilcox.pv < 0.05, .(n = .N), by = .(ct, method)]
+```
+
+```{r Fig_marker_assoc_pheno, fig.width=6, fig.height=2}
+.aes <- aes(y = ct, x = gene, fill = -log10(wilcox.pv))
+.lab <- function(x) num.sci(10^(-x))
+plt <- 
+    .gg.plot(.marker.assoc.stat[method == "avg"], .aes) +
+    ylab("cell type") +
+    xlab(length(unique(.marker.assoc.stat$gene)) %&% " marker genes") + 
+    geom_tile() +
+    scale_fill_distiller("p-value", palette = "RdPu", direction=1, labels = .lab) +
+    theme(legend.position = "bottom") +
+    theme(axis.text.x = element_blank()) +
+    theme(axis.ticks.x = element_blank())
+print(plt)
+.file <- fig.dir %&% "/Fig_marker_assoc_pheno.pdf"
+.gg.save(.file, plot=plt, width = 6, height = 2)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+
+```{r Fig_marker_assoc_pheno_count, fig.width=2, fig.height=1.5}
+.aes <- aes(y = ct, yend = ct, x = 0, xend = n, label = n)
+plt <-
+    .gg.plot(.marker.freq[method=="avg"], .aes) +
+    ylab("cell type") +
+    xlab("# genes with p-value < 0.05") +
+    geom_segment(size=2, colour = "#000099") +
+    geom_text(size=2)
+print(plt)
+.file <- fig.dir %&% "/Fig_marker_assoc_pheno_count.pdf"
+.gg.save(.file, plot=plt, width = 2, height = 1.5)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
 
 
 ## Differential expression analysis
@@ -582,11 +626,62 @@ select.genes <- function(.ct, fdr.cutoff = 0.01) {
 
 ### Why do we find more genes with CoCoA?
 
+
+```{r include = FALSE}
+read.pheno <- function() {
+
+    .apoe.code <- function(x) {
+        if(is.na(x)) return(NA) 
+        if(x == 44) return(2)
+        if(x %in% c(24, 34)) return(1)
+        return(0) 
+    }
+
+    pheno.dt <- fread("data/brain_2018-05-03/phenotypes.csv",
+                      header=TRUE, na.strings = "-9")
+
+    pheno.dt[, apoe.e4 := sapply(apoe_genotype, .apoe.code)]
+    return(pheno.dt)
+}
+
+take.assoc.stat <- function(.dt, .pheno, log.trans = TRUE) {
+    
+    .dt.flat <- dcast(.dt, gene ~ projid, value.var = "cf")
+
+    .xtib <- .dt.flat %>% select(gene) %>% mutate(x.col = 1:n())
+    .mat <- .dt.flat %>% select(-gene) %>% as.matrix
+
+    if(log.trans) {
+        .xx <- t(log(1 + .mat)) %>% scale
+    } else {
+        .xx <- scale(.mat)
+    }
+
+    .yy <-
+        data.table(projid= as.integer(colnames(.mat))) %>%
+        left_join(.pheno, by = "projid") %>%
+        select(-projid) %>%
+        as.matrix
+
+    .ytib <-
+        tibble(pheno = colnames(.yy)) %>%
+        mutate(y.col = 1:n())
+
+    zqtl::calc.qtl.stat(.xx, .yy) %>%
+        left_join(.xtib, by = "x.col") %>%
+        left_join(.ytib, by = "y.col") %>%
+        select(-x.col, -y.col) %>% 
+        as.data.table
+}
+```
+
+
 #### Take the examples of Microglia genes
 
 ```{r include = FALSE}
 pheno.dt <- read.pheno()
 local.dt <- .read.cocoa("Microglia_1")
+
 cf.pheno <- 
     pheno.dt[, .(projid, np_sqrt, nft_sqrt, cogn_ep_random_slope,
                  pathoAD, msex, educ, age_death, apoe.e4)]
@@ -662,8 +757,6 @@ print(plt)
 cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
-
-
 ```{r Fig_Example_APOE_Pheno, fig.width=2, fig.height=6}
 plt <- show.one.gene(local.dt[gene == "APOE"], cocoa.dt[gene == "APOE" & ct == "Microglia"])
 print(plt)
@@ -673,6 +766,48 @@ print(plt)
 
 ```{r results="asis"}
 cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+### Confounding effects prevalent...
+
+```{r include=FALSE}
+ct.names <- c("Ex", "In", "Oligo", "OPC", "Microglia", "Astro", "Per", "Endo")
+
+.read.cf.stat <- function(.ct) {
+    .stat.file <- "result/glob_stat/" %&% .ct %&% "_1.cf_stat.gz"
+    fread(.stat.file, header=TRUE) %>% 
+        mutate(ct = .ct)
+}
+
+.cf.assoc.stat <-
+    lapply(ct.names, .read.cf.stat) %>%
+    do.call(what=rbind) %>%
+    mutate(ct = factor(ct, rev(.marker.order$ro)))
+
+.cf.pv.dt <- 
+    dcast(.cf.assoc.stat, gene + ct ~ method, value.var = "wilcox.pv")
+
+.cf.effect.dt <- 
+    dcast(.cf.assoc.stat, gene + ct ~ method, value.var = "t.stat")
+```
+
+
+
+```{r Fig_cf_vs_avg_tstat, fig.width=8, fig.height=2, results="asis"}
+plt <- 
+    .gg.plot(.cf.effect.dt, aes(x = cf, y = avg, fill = ct)) +
+    facet_wrap(~ct, scales="free", nrow = 1) +
+    geom_point(pch = 21, stroke = .1) +
+    geom_smooth(method="lm", se=FALSE, size=.2, formula=y~x, colour="black") +
+    ggpubr::stat_cor(label.x.npc="left", label.y.npc="bottom", size=2) +
+    xlab("Association with the confounding effects (t-stat)") +
+    ylab("Assoc. w/ PB") +
+    scale_fill_manual(values = rev(.marker.order$col), guide=FALSE)
+
+.file <- fig.dir %&% "/Fig_cf_vs_avg_tstat.pdf"
+print(plt)
+.gg.save(.file, plot=plt, width = 8, height = 2)
+cat("\n\n[PDF](" %&% .file %&% ")\n\n")
 ```
 
 

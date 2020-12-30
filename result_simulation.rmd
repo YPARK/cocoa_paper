@@ -112,6 +112,9 @@ plot.f1 <- function(.dt) {
 }
 ```
 
+## CoCoA improves statistical power
+
+
 ```{r fig.width=6, fig.height=5}
 p1 <- plot.f1(read.f1("sim_N40_M50")) + ggtitle("50 cells per individual")
 p2 <- plot.f1(read.f1("sim_N40_M10")) + ggtitle("10 cells per individual")
@@ -125,7 +128,6 @@ print(plt)
 cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
-
 ```{r fig.width=6, fig.height=5}
 p1 <- plot.power(read.power("sim_N40_M50")) + ggtitle("50 cells per individual")
 p2 <- plot.power(read.power("sim_N40_M10")) + ggtitle("10 cells per individual")
@@ -133,6 +135,43 @@ plt <- p1/p2
 print(plt)
 .file <- fig.dir %&% "/Fig_Sim_Power.pdf"
 .gg.save(.file, plot=plt, width=6, height=5)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+## CoCoA controls false discovery rates
+
+
+```{r include = FALSE}
+read.efdr <- function(hdr) {
+    .dat <- .read(hdr)
+    .dat[,
+         .(efdr = mean(efdr), efdr.sd = sd(efdr)),
+         by = .(target, p0, pa, method)]
+}    
+
+hdr <- "null_N40_M50"
+efdr.dt <- read.efdr(hdr)
+```
+
+```{r fig.width=4, fig.height=5}
+.dt <- efdr.dt
+.aes <- aes(x = 100 * p0, y = efdr, ymin=pmax(efdr-efdr.sd, 0), ymax=pmin(efdr+efdr.sd, 1))
+
+plt <-
+    .gg.plot(.dt[method == "cocoa"], .aes) +
+    ylab("empirical FDR") +
+    xlab("% variance explained by confounding effect") +
+    facet_grid(target ~ pa, scale="free") +
+    geom_hline(aes(yintercept = target), colour="red", lty=2, size=.2) +
+    geom_bar(stat="identity", fill="#000099", width=10) +
+    geom_errorbar(width=3, size=.3)
+
+.file <- fig.dir %&% "/Fig_Sim_FDR.pdf"
+.gg.save(.file, plot=plt, width=4, height=5)
+print(plt)
 ```
 
 ```{r results="asis"}
