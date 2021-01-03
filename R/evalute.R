@@ -88,7 +88,7 @@ take.summary <- function(.stat, fdr.cutoff = .5) {
     .ret %>%
         filter(fdr <= fdr.cutoff) %>%
         arrange(desc(fdr), power) %>%
-        select(fdr, tdr, power, efdr) %>%
+        select(fdr, tdr, power) %>%
         mutate(f1 = 2 * (1-fdr) * power / (1-fdr + power))
 }
 

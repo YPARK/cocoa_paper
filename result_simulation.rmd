@@ -18,97 +18,143 @@ options(stringsAsFactors = FALSE)
 ```
 
 ```{r include = FALSE}
-.read <- function(hdr) {
-  .files <- list.files(hdr %&% "/result/",
-                       pattern = "eval", full.names=TRUE)
+.fread <- function(x, ...) {
+    .cmd <- ifelse(str_ends(x, "gz"), "gzip -cd ", "cat")
+    fread(cmd = .cmd %&% " " %&% x %&% "| sed 's/  / NA /g'", ...)
+}
 
-  .dat <- lapply(.files, fread, header=T) %>%
-    do.call(what=rbind) %>%
-    mutate(p1 = as.numeric("0." %&% p1)) %>% 
-    mutate(pa = as.numeric("0." %&% pa)) %>% 
-    mutate(p0 = as.numeric("0." %&% p0))
+.read <- function(hdr) {
+
+    .files.1 <- list.files(hdr %&% "/result/",
+                           pattern = "eval", full.names=TRUE)
+
+    .files.2 <- list.files(hdr %&% "/summary/",
+                           pattern = "eval.gz", full.names=TRUE)
+
+    .files <- c(.files.1, .files.2)
+
+    .dat <- lapply(.files, .fread, header=TRUE) %>% 
+        do.call(what=rbind) %>%
+        mutate(p1 = as.numeric("0." %&% p1)) %>% 
+        mutate(pa = as.numeric("0." %&% pa)) %>% 
+        mutate(p0 = as.numeric("0." %&% p0))
 }
 
 read.power <- function(hdr, fdr.cutoff = .1) {
 
-  .dat <- .read(hdr)
-  .ret <- .dat[order(.dat$power, decreasing=TRUE)]
-  .ret <- .ret[fdr <= fdr.cutoff, head(.SD, 1),
-               by = .(p1, p0, pa, rseed, method)]
+    .dat <- .read(hdr)
+    .ret <- .dat[order(.dat$power, decreasing=TRUE)]
+    .ret <- .ret[fdr <= fdr.cutoff, head(.SD, 1),
+                 by = .(p1, p0, pa, rseed, method)]
 
-  .ret[, fdr.cutoff := fdr.cutoff]
+    .ret[, fdr.cutoff := fdr.cutoff]
 
-  return(.ret)
+    return(.ret)
 }
 
 read.f1 <- function(hdr) {
 
-  .dat <- .read(hdr)
-  .ret <- .dat[order(.dat$f1, decreasing=TRUE)]
-  .ret <- .ret[, head(.SD, 1),
-               by = .(p1, p0, pa, rseed, method)]
+    .dat <- .read(hdr)
+    .ret <- .dat[order(.dat$f1, decreasing=TRUE)]
+    .ret <- .ret[, head(.SD, 1),
+                 by = .(p1, p0, pa, rseed, method)]
 
-  return(.ret)
+    return(.ret)
 }
 
 .rename <- function(.sum) {
 
-  .method <- c("opt","cocoa","marg")
-  .lab <- c("optimal", "CoCoA", "marginal")
-  .sum[, method := factor(method, .method, .lab)]
+    .method <- c("opt","cocoa","marg","mu","avg","tot")
+    .lab <- c("optimal", "CoCoA", "marginal","mu", "average", "total")
+    .sum[, method := factor(method, .method, .lab)]
 
-  .pa <- sort(unique(.sum$pa))
-  .pa.lab <- "X to W (" %&% round(.pa * 100) %&% "%)"
-  .sum[, pa := factor(pa, .pa, .pa.lab)]
+    .pa <- sort(unique(.sum$pa))
+    .pa.lab <- "X to W (" %&% round(.pa * 100) %&% "%)"
+    .sum[, pa := factor(pa, .pa, .pa.lab)]
 
-  return(.sum)
+    return(.sum)
 }
 
 .ggplot <- function(...) {
-  .scale.x <-
-    scale_x_continuous("% variance explained by phenotype (W)",
-                       labels=function(x) round(100 * x))
-  ggplot(...) +
-    theme_bw() +
-    theme(strip.text = element_text(size=8)) +
-    theme(legend.text = element_text(size=8)) +
-    theme(legend.title = element_text(size=6)) +
-    scale_linetype_manual(values=c(3, 1, 2))+
-    .scale.x    
+    .scale.x <-
+        scale_x_continuous("% variance explained by phenotype (W)",
+                           labels=function(x) round(100 * x))
+    ggplot(...) +
+        theme_bw() +
+        theme(strip.text = element_text(size=8)) +
+        theme(legend.text = element_text(size=8)) +
+        theme(legend.title = element_text(size=6)) +
+        .scale.x    
 }
 
 plot.power <- function(.dt) {
 
-  .sum <- .dt[, .(y = mean(power), y.se = sd(power)/sqrt(.N)),
-              by = .(p1, p0, pa, method, fdr.cutoff)]
+    .sum <- .dt[!is.na(power),
+                .(y = mean(power), y.se = sd(power)/sqrt(.N)),
+                by = .(p1, p0, pa, method, fdr.cutoff)]
+    
+    .cutoff <- min(.sum$fdr.cutoff)
 
-  .cutoff <- min(.sum$fdr.cutoff)
+    .sum <- .rename(.sum)
 
-  .sum <- .rename(.sum)
+    .aes <- aes(x = p1, y = y, ymin = y - y.se, ymax = y + y.se, lty = method)
 
-  .aes <- aes(x = p1, y = y, ymin = y - y.se, ymax = y + y.se, lty = method)
-
-  .ggplot(.sum, .aes) +
-    facet_wrap(~pa, nrow=1, scales="free") +
-    ylab("power at FDR < " %&% .cutoff) +
-    geom_line() +
-    geom_linerange(lty=1)
+    .ggplot(.sum, .aes) +
+        facet_wrap(~pa, nrow=1, scales="free") +
+        ylab("power at FDR < " %&% .cutoff) +
+        geom_line() +
+        scale_linetype_manual(values=c(3, 1, 2))+
+        geom_linerange(lty=1)
 }
 
 plot.f1 <- function(.dt) {
 
-  .sum <- .dt[, .(y = mean(f1), y.se = sd(f1)/sqrt(.N)),
-              by = .(p1, p0, pa, method)]
+    .sum <- .dt[!is.na(f1),
+                .(y = mean(f1), y.se = sd(f1)/sqrt(.N)),
+                by = .(p1, p0, pa, method)]
 
-  .sum <- .rename(.sum)
+    .sum <- .rename(.sum)
 
-  .aes <- aes(x = p1, y = y, ymin = y - y.se, ymax = y + y.se, lty = method)
+    .aes <- aes(x = p1, y = y, ymin = y - y.se, ymax = y + y.se, lty = method)
 
-  .ggplot(.sum, .aes) +
-    facet_wrap(~pa, nrow=1, scales="free") +
-    ylab("F1 score in PR curve") +
-    geom_line() +
-    geom_linerange(lty=1)
+    .ggplot(.sum, .aes) +
+        facet_wrap(~pa, nrow=1, scales="free") +
+        ylab("F1 score in PR curve") +
+        geom_line() +
+        scale_linetype_manual(values=c(3, 1, 2))+
+        geom_linerange(lty=1)
+}
+
+.rename.v2 <- function(.sum) {
+
+    .method <- c("cocoa","mu","avg","tot")
+    .lab <- c("CoCoA", "mu", "average", "total")
+    .sum[, method := factor(method, .method, .lab)]
+
+    .pa <- sort(unique(.sum$pa))
+    .pa.lab <- "X to W (" %&% round(.pa * 100) %&% "%)"
+    .sum[, pa := factor(pa, .pa, .pa.lab)]
+
+    return(.sum)
+}
+
+plot.f1.v2 <- function(.dt) {
+
+    .sum <- .dt[!is.na(f1),
+                .(y = mean(f1), y.se = sd(f1)/sqrt(.N)),
+                by = .(p1, p0, pa, method)]
+
+    .sum <- .rename.v2(.sum)
+
+    .aes <- aes(x = p1, y = y, ymin = y - y.se, ymax = y + y.se, colour = method, lty = method)
+
+    .ggplot(.sum, .aes) +
+        facet_wrap(~pa, nrow=1, scales="free") +
+        ylab("F1 score in PR curve") +
+        geom_line() +
+        geom_linerange(lty=1) +
+        scale_linetype_manual(values = c("solid", "longdash", "dashed", "dotted")) +
+        scale_colour_manual(values = c("red", "gray30", "#000099", "#009900"))
 }
 ```
 
@@ -135,6 +181,30 @@ plt <- p1/p2
 print(plt)
 .file <- fig.dir %&% "/Fig_Sim_Power.pdf"
 .gg.save(.file, plot=plt, width=6, height=5)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+## CoCoA improves statistical power - round 2
+
+```{r Fig_Sim_F1_round2, fig.width=6, fig.height = 3}
+plt <- plot.f1.v2(read.f1("sim_v2_N40_M50"))
+print(plt)
+.file <- fig.dir %&% "/Fig_Sim_F1_round2.pdf"
+.gg.save(.file, plot=plt, width=6, height=3)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+```{r Fig_Sim_F1_round2_100, fig.width=6, fig.height = 3}
+plt <- plot.f1.v2(read.f1("sim_v2_N40_M100"))
+print(plt)
+.file <- fig.dir %&% "/Fig_Sim_F1_round2_100.pdf"
+.gg.save(.file, plot=plt, width=6, height=3)
 ```
 
 ```{r results="asis"}

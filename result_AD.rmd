@@ -400,6 +400,110 @@ n.fdr01.ct.genes <- cocoa.dt[qv < .01, .(n=length(unique(gene))), by=.(ct)] %>%
     arrange(factor(ct, rev(.marker.order$ro)))
 ```
 
+### What if cell types were combined? Cell-type-sorted pseudo-bulk analysis improves statistical power
+
+```{r include = FALSE}
+bulk.dt <-
+    fread("result/combined/stat/1.stat.gz", header=TRUE) %>%
+    mutate(ct = "bulk") %>%
+    as.data.table
+
+.count.discovery <- function(.method) {
+    .cutoff <- 10^(seq(-8, -2, by = .25))
+
+    .dt.1 <- bulk.dt[method == .method, .(gene, wilcox.pv)]
+    .dt.1[, ct := "bulk"]
+    .dt.2 <- glob.dt[method == .method, .(gene, ct, wilcox.pv)]
+
+    .dt <- rbind(.dt.1, .dt.2)
+    .dt <- .dt[order(.dt$wilcox.pv)]
+    .dt[ct == "bulk", ct.vs.bulk := "bulk"]
+    .dt[ct != "bulk", ct.vs.bulk := "sorted"]
+
+    c1 <- function(cutoff){
+        .ret <- .dt[wilcox.pv < cutoff,
+                    .(n = unique(length(gene))),
+                    by = .(ct, ct.vs.bulk)]
+        .ret[, cutoff := cutoff]
+        return(.ret)
+    }
+
+    c2 <- function(cutoff){
+        .ret <- .dt[wilcox.pv < cutoff,
+                    .(ntot = unique(length(gene))),
+                    by = .(ct.vs.bulk)]
+        .ret[, cutoff := cutoff]
+        return(.ret)
+    }
+
+    ret.1 <- lapply(.cutoff, c1) %>% do.call(what=rbind)
+    ret.2 <- lapply(.cutoff, c2) %>% do.call(what=rbind)
+        
+    ret <- merge(ret.1, ret.2)
+    ret[, method := .method]
+    return(ret)
+}
+
+count.tab <- 
+    rbind(.count.discovery("cocoa"),
+          .count.discovery("tot"),
+          .count.discovery("avg"))
+```
+
+
+```{r Fig_DEG_ct_prop, fig.width=5, fig.height=2}
+.dt <- count.tab[ct != "bulk"]
+
+.col <- 
+    left_join(tibble(ct = sort(unique(.dt$ct))), .colors) %>%
+    select(hex) %>%
+    unlist %>% 
+    as.character
+
+.brk <- seq(-8, 0)
+
+plt <-
+    .gg.plot(.dt, aes(x = log10(cutoff), y = n/ntot, fill = ct)) +
+    facet_wrap(~method, scales="free") +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = .col) +
+    scale_x_continuous("p-value cutoff", labels = function(x) 10^(x), breaks = .brk) +
+    theme(legend.position = "bottom")
+
+print(plt)
+
+.file <- fig.dir %&% "/Fig_DEG_ct_prop.pdf"
+.gg.save(.file, plot=plt, width = 5, height = 2)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+
+```{r Fig_DEG_bulk_count, fig.width=5, fig.height=2}
+.brk <- seq(-8, 0)
+
+plt <- 
+    .gg.plot(count.tab, aes(x = log10(cutoff), y = ntot, fill = ct.vs.bulk)) +
+    facet_wrap(~method, scales="free") +
+    geom_line() +
+    geom_point(pch = 21) +
+    scale_y_continuous("# unique genes", labels = function(x) num.int(x)) +
+    scale_x_continuous("p-value cutoff", labels = function(x) 10^(x), breaks = .brk) +
+    scale_fill_manual(values = c("white", "black")) +
+    theme(legend.position = "bottom")
+
+print(plt)
+
+.file <- fig.dir %&% "/Fig_DEG_bulk_count.pdf"
+.gg.save(.file, plot=plt, width = 5, height = 2)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
 ### CoCoA identified `r num.int(n.fdr01.genes)` genes are differentially-regulated between different AD conditions
 
 * `r num.int(n.fdr01.genes)` genes (`r num.round(100 * n.fdr01.genes / n.tot.genes)`%) consist of `r paste(n.fdr01.ct.genes$str, collapse=", ")`
@@ -793,7 +897,7 @@ ct.names <- c("Ex", "In", "Oligo", "OPC", "Microglia", "Astro", "Per", "Endo")
 
 
 
-```{r Fig_cf_vs_avg_tstat, fig.width=8, fig.height=2, results="asis"}
+```{r Fig_cf_vs_avg_tstat, fig.width=8, fig.height=1.5, results="asis"}
 plt <- 
     .gg.plot(.cf.effect.dt, aes(x = cf, y = avg, fill = ct)) +
     facet_wrap(~ct, scales="free", nrow = 1) +
@@ -809,6 +913,63 @@ print(plt)
 .gg.save(.file, plot=plt, width = 8, height = 2)
 cat("\n\n[PDF](" %&% .file %&% ")\n\n")
 ```
+
+
+```{r Fig_cf_vs_cocoa_tstat, fig.width=8, fig.height=1.5, results="asis"}
+.dt.1 <- cocoa.dt[method == "cocoa", .(gene, ct, t.stat, method)]
+.dt.2 <- .cf.assoc.stat[method == "cf", .(gene, ct, t.stat, method)]
+
+.cocoa.cf.dt <-rbind(.dt.1, .dt.2)
+
+.effect.dt <- dcast(.cocoa.cf.dt,
+                    gene + ct ~ method, value.var = "t.stat",
+                    fun.aggregate=mean, fill = NA) %>% 
+    mutate(ct = factor(ct, rev(.marker.order$ro)))
+
+plt <-
+    .gg.plot(.effect.dt, aes(x = cf, y = cocoa, fill = ct)) +
+    facet_wrap(~ct, scales="free", nrow = 1) +
+    geom_point(pch = 21, stroke = .1) +
+    geom_smooth(method="lm", se=FALSE, size=.2, formula=y~x, colour="black") +
+    ggpubr::stat_cor(label.x.npc="left", label.y.npc="bottom", size=2) +
+    xlab("Association with the confounding effects (t-stat)") +
+    ylab("CoCoA") +
+    scale_fill_manual(values = rev(.marker.order$col), guide=FALSE)
+
+.file <- fig.dir %&% "/Fig_cf_vs_cocoa_tstat.pdf"
+print(plt)
+.gg.save(.file, plot=plt, width = 8, height = 2)
+cat("\n\n[PDF](" %&% .file %&% ")\n\n")
+```
+
+
+```{r Fig_avg_vs_cf_tstat, fig.width=8, fig.height=1.5, results="asis"}
+.dt.1 <- cocoa.dt[method == "cocoa", .(gene, ct, t.stat, method)]
+.dt.2 <- avg.dt[method == "avg", .(gene, ct, t.stat, method)]
+
+.cocoa.avg.dt <-rbind(.dt.1, .dt.2)
+
+.effect.dt <- dcast(.cocoa.avg.dt,
+                    gene + ct ~ method, value.var = "t.stat",
+                    fun.aggregate=mean, fill = NA) %>% 
+    mutate(ct = factor(ct, rev(.marker.order$ro)))
+
+plt <-
+    .gg.plot(.effect.dt, aes(x = avg, y = cocoa, fill = ct)) +
+    facet_wrap(~ct, scales="free", nrow = 1) +
+    geom_point(pch = 21, stroke = .1) +
+    geom_smooth(method="lm", se=FALSE, size=.2, formula=y~x, colour="black") +
+    ggpubr::stat_cor(label.x.npc="left", label.y.npc="bottom", size=2) +
+    xlab("Association with the confounding effects (t-stat)") +
+    ylab("CoCoA") +
+    scale_fill_manual(values = rev(.marker.order$col), guide=FALSE)
+
+.file <- fig.dir %&% "/Fig_avg_vs_cocoa_tstat.pdf"
+print(plt)
+.gg.save(.file, plot=plt, width = 8, height = 2)
+cat("\n\n[PDF](" %&% .file %&% ")\n\n")
+```
+
 
 
 ### A genomic view combining all the cell types

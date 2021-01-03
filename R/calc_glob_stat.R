@@ -1,16 +1,17 @@
 #!/usr/bin/env Rscript
 
-ln.mu.file <- "result/cocoa/Microglia_1.boot_ln_mu.gz"
-col.file <- "result/cocoa/Microglia_1.mu_cols.gz"
-sum.file  <- "result/aggregate/Microglia_1.sum.gz"
-mean.file  <- "result/aggregate/Microglia_1.mean.gz"
-sum.col.file  <- "result/aggregate/Microglia_1.mu_cols.gz"
-row.file <- "data/brain_2018-05-03/features.tsv.gz"
-pheno.file <- "result/phenotyped.txt.gz"
+## ln.mu.file <- "result/combined/cocoa/combined_1.boot_ln_mu.gz"
+## col.file <- "result/combined/cocoa/combined_1.mu_cols.gz"
+## sum.file  <- "result/combined/aggregate/combined_1.sum.gz"
+## mean.file  <- "result/combined/aggregate/combined_1.mean.gz"
+## sum.col.file  <- "result/combined/aggregate/combined_1.mu_cols.gz"
+## row.file <- "data/brain_2018-05-03/features.tsv.gz"
+## pheno.file <- "result/phenotyped.txt.gz"
 
 argv <- commandArgs(trailingOnly = TRUE)
 
 if(length(argv) != 8) {
+    cat("Missing arguments: ", paste(argv, collapse=", "))
     q()
 }
 

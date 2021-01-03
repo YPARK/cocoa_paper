@@ -16,7 +16,7 @@ all:
 
 ################################################################
 
-step1: result/celltype.annot.gz $(DATA) result/phenotyped.txt.gz
+step1: result/celltype.annot.gz $(DATA) result/phenotyped.txt.gz $(foreach f, 1, result/combined/aggregate/combined_$(f).mean.gz result/combined/cocoa/combined_$(f).resid_mu.gz result/combined/stat/$(f).stat.gz)
 
 result/celltype.annot.gz: data/PsychENCODE.marker $(MTX) $(ROW) $(COL)
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
@@ -37,13 +37,71 @@ result/phenotyped.txt.gz: R/find_phenotyped.R $(PHENO_DATA)
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	Rscript --vanilla $^ $@
 
+#####################################
+# What if cell types were combined? #
+#####################################
+
+# % = $(pheno_col) in {1, 2}
+result/combined/%.pheno_select.gz: result/phenotyped.txt.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	gzip -cd $< | awk -F'\t' -vC=$* 'NR > 1 && $$(C + 2) != -9 && $$(C + 2) != "NA" && length($$(C + 2)) > 0 { print $$1 }' | gzip > $@
+
+# % = $(pheno_col) in {1, 2}
+result/combined/%.mtx.gz: result/combined/%.pheno_select.gz $(MTX) $(COL)
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	mmutil_select_col $(MTX) $(COL) $< $(shell echo $@ | sed 's/.mtx.gz//g')
+
+# % = $(pheno_col)
+result/combined/%.cols.gz: result/combined/%.mtx.gz
+	touch $@
+
+# % = $(pheno_col)
+result/combined/cocoa/combined_%.trt.gz: R/match_pheno.R result/combined/%.cols.gz result/phenotyped.txt.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	Rscript --vanilla $^ $* $@
+
+# % = $(pheno_col)
+result/combined/cocoa/combined_%.ind.gz: R/match_pheno.R result/combined/%.cols.gz result/phenotyped.txt.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	Rscript --vanilla $^ 0 $@
+
+# % = $(pheno_col)
+result/combined/cocoa/combined_%.annot.gz: result/combined/%.cols.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	gzip -cd $< | awk '{ print $$1 FS "combined_$*" }' | gzip -c > $@
+
+# % = $(pheno_col)
+result/combined/cocoa/combined_%.lab.gz:
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	echo "combined" | gzip -c > $@
+
+# % = $(pheno_col)
+result/combined/cocoa/combined_%.resid_mu.gz: result/combined/%.mtx.gz result/combined/%.cols.gz result/combined/%.annot.gz result/combined/%.trt.gz result/combined/%.lab.gz result/combined/%.ind.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	OMP_NUM_THREADS=16 mmutil_cfa_col --mtx result/combined/$*.mtx.gz --col result/combined/$*.cols.gz --annot result/combined/$*.annot.gz --trt result/combined/$*.trt.gz --lab result/combined/$*.lab.gz --ind result/combined/$*.ind.gz --verbose --knn 100 --nboot 100 --rank 50 --log_scale --out $(shell echo $@ | sed 's/.resid_mu.gz//g')
+
+# % = $(pheno_col)
+result/combined/aggregate/combined_%.mean.gz: result/combined/%.mtx.gz result/combined/%.cols.gz result/combined/%.annot.gz result/combined/%.trt.gz result/combined/%.lab.gz result/combined/%.ind.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	mmutil_aggregate_col --mtx result/combined/$*.mtx.gz --col result/combined/$*.cols.gz --annot result/combined/$*.annot.gz --lab result/combined/$*.lab.gz --ind result/combined/$*.ind.gz --verbose --out $(shell echo $@ | sed 's/.mean.gz//g')
+
+result/combined/aggregate/combined_%.sum.gz: result/combined/aggregate/combined_%.mean.gz
+	@touch $@
+
+result/combined/aggregate/combined_%.mu_cols.gz: result/combined/aggregate/combined_%.mean.gz
+	@touch $@
+
+result/combined/stat/%.stat.gz: R/calc_glob_stat.R result/combined/cocoa/combined_%.boot_ln_mu.gz result/combined/cocoa/combined_%.mu_cols.gz result/combined/aggregate/combined_%.sum.gz result/combined/aggregate/combined_%.mean.gz result/combined/aggregate/combined_%.mu_cols.gz data/brain_2018-05-03/features.tsv.gz result/phenotyped.txt.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	Rscript --vanilla $^ $@
+
 ################################################################
 # note: "result/phenotyped.txt.gz" contains TAG,IID,{Pheno_types}
 NPheno := $(shell [ -f result/phenotyped.txt.gz ] && gzip -cd result/phenotyped.txt.gz | head -n1 | awk '{ print (NF -2) }')
 
 pheno_ := 1 2
 
-step2: $(foreach c, $(CT), $(foreach f, $(pheno_), result/cocoa/$(c)_$(f).resid_mu.gz result/aggregate/$(c)_$(f).mean.gz))
+step2: $(foreach c, $(CT), $(foreach f, 1 2, result/cocoa/$(c)_$(f).resid_mu.gz) $(foreach f, 1 2 3 4, result/aggregate/$(c)_$(f).mean.gz))
 
 # % = $(celltype)_$(pheno_col)
 result/temp/%.pheno_select.gz: result/phenotyped.txt.gz
