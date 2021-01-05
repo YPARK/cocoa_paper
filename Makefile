@@ -168,7 +168,7 @@ RMD := $(wildcard *.rmd)
 HTML := $(RMD:.rmd=.html)
 PDF := $(RMD:.rmd=.pdf)
 
-doc: $(HTML) $(PDF)
+doc: $(HTML)
 
 %.html: %.rmd $(COMMON)
 	Rscript -e "library(rmarkdown); render('$<');"

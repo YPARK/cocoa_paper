@@ -407,6 +407,15 @@ n.fwer01.ct.genes <- cocoa.dt[fwer < .01, .(n=length(unique(gene))), by=.(ct)] %
     arrange(factor(ct, rev(.marker.order$ro)))
 ```
 
+### A table for genes significant at FWER 1%
+
+```{r include = FALSE}
+dir.create("Tab/AD/", recursive=TRUE, showWarnings=FALSE)
+fwer01.genes <- cocoa.dt[fwer < .01, .(gene)] %>% unique
+out.dt <- left_join(fwer01.genes, cocoa.dt, by = "gene") %>% as.data.table
+fwrite(out.dt, file="Tab/AD/fwer.txt.gz", row.names=FALSE, col.names=TRUE, sep="\t")
+```
+
 ### What if cell types were combined? Cell-type-sorted pseudo-bulk analysis improves statistical power
 
 ```{r include = FALSE}
@@ -715,7 +724,7 @@ plot.genome <- function(.ct, fdr.cutoff = .01) {
         geom_hline(yintercept = 0, size = .2) +
         facet_grid(.~as.integer(chromosome_name), space="free", scales="free") +
         geom_point(colour = "gray", size=.2) +
-        ggrepel::geom_text_repel(aes(label=gene), data = .dt.lab, size = 2, segment.size=.1) +
+        geom_text(aes(label=gene), data = .dt.lab, size = 1) +
         geom_point(aes(fill = t.stat), data = .dt.lab, size = 1, pch = 21, stroke = .1) +
         scale_x_continuous(labels = function(x) round(x/1e6)) +
         scale_fill_gradient2("t-statistic", low="blue", high="red") +
@@ -1312,7 +1321,8 @@ cat("[PDF](" %&% .file %&% ")\n\n")
 ```{r include=FALSE}
 plot.go.heatmap <- function(go.ct.dt, fdr.cutoff = .1) {
 
-    go.show <- go.ct.dt[qv < fdr.cutoff, .(name_1006)] %>% unique
+    go.show <- go.ct.dt[qv < fdr.cutoff & n.w.drawn > 2,
+                        .(name_1006)] %>% unique
 
     .dt <- merge(go.show, go.ct.dt) %>%
         mutate(row = ct, col = name_1006, weight = -log10(pv)) %>% 
@@ -1346,49 +1356,24 @@ plot.go.heatmap <- function(go.ct.dt, fdr.cutoff = .1) {
 }
 
 measure.size <- function(go.ct.dt, fdr.cutoff) {
-    .nrow <- length(unique(go.ct.dt[qv < fdr.cutoff]$name_1006))
-    .ncol <- length(unique(go.ct.dt[qv < fdr.cutoff]$ct))
-    .lab <- max(sapply(go.ct.dt[qv < fdr.cutoff]$name_1006, nchar))
+    .nrow <- length(unique(go.ct.dt[qv < fdr.cutoff & n.w.drawn > 2]$name_1006))
+    .ncol <- length(unique(go.ct.dt[qv < fdr.cutoff & n.w.drawn > 2]$ct))
+    .lab <- max(sapply(go.ct.dt[qv < fdr.cutoff & n.w.drawn > 2]$name_1006, nchar))
 
-    list(w = (.lab * .055 + .ncol * .15 + 1),
-         h = ceiling(.1 * .nrow + .5))
+    list(w = (.lab * .055 + .ncol * .05 + .5),
+         h = ceiling(.075 * .nrow + .25))
 }
 ```
 
-#### DEGs combined
 
-```{r Fig_GO_Enrichment_CT_combined, fig.width=4.835, fig.height=2}
+#### DEGs up-regulated (`r num.int(nrow(unique(cocoa.dt[qv < .05 & t.stat > 0, .(gene)])))` genes)
+
+```{r Fig_GO_Enrichment_CT_up, fig.width=5.695, fig.height=5}
 go.ct.dt <-
     lapply(ct.names, function(.ct) {
         test.go.enrichment(cocoa.dt,
                            gene.ontology$go,
-                           fdr.cutoff = .1,
-                           .ct = .ct) %>% 
-            mutate(ct = .ct)
-    }) %>%
-    do.call(what=rbind) %>% 
-    filter(n.w.drawn > 1)
-
-plt <- plot.go.heatmap(go.ct.dt, .1)
-print(plt)
-.file <- fig.dir %&% "/Fig_GO_Enrichment_CT_combined.pdf"
-.sz <- measure.size(go.ct.dt, .1)
-.gg.save(.file, plot=plt, width = .sz$w, height = .sz$h)
-```
-
-```{r results="asis"}
-cat("[PDF](" %&% .file %&% ")\n\n")
-```
-
-
-#### DEGs up-regulated
-
-```{r Fig_GO_Enrichment_CT_up, fig.width=5.435, fig.height=4}
-go.ct.dt <-
-    lapply(ct.names, function(.ct) {
-        test.go.enrichment(cocoa.dt,
-                           gene.ontology$go,
-                           fdr.cutoff = .1,
+                           fdr.cutoff = .05,
                            .ct = .ct,
                            direction = 1) %>% 
             mutate(ct = .ct)
@@ -1407,14 +1392,23 @@ print(plt)
 cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
-#### DEGs down-regulated
+#### A table for the GO keywords enriched by the up-regulated genes
 
-```{r Fig_GO_Enrichment_CT_down, fig.width=4.475, fig.height=2}
+```{r include = FALSE}
+dir.create("Tab/AD/", recursive=TRUE, showWarnings=FALSE)
+out.dt <- go.ct.dt[qv < .1]
+fwrite(out.dt, file="Tab/AD/GO_CT_UP.txt.gz", row.names=FALSE, col.names=TRUE, sep="\t")
+```
+
+
+#### DEGs down-regulated (`r num.int(nrow(unique(cocoa.dt[qv < .05 & t.stat < 0, .(gene)])))` genes)
+
+```{r Fig_GO_Enrichment_CT_down, fig.width=3.405, fig.height=1}
 go.ct.dt <-
     lapply(ct.names, function(.ct) {
         test.go.enrichment(cocoa.dt,
                            gene.ontology$go,
-                           fdr.cutoff = .1,
+                           fdr.cutoff = .05,
                            .ct = .ct,
                            direction = -1) %>% 
             mutate(ct = .ct)
@@ -1431,4 +1425,12 @@ print(plt)
 
 ```{r results="asis"}
 cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+#### A table for the GO keywords enriched by the down-regulated genes
+
+```{r include = FALSE}
+dir.create("Tab/AD/", recursive=TRUE, showWarnings=FALSE)
+out.dt <- go.ct.dt[qv < .1]
+fwrite(out.dt, file="Tab/AD/GO_CT_DOWN.txt.gz", row.names=FALSE, col.names=TRUE, sep="\t")
 ```
