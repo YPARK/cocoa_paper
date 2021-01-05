@@ -394,8 +394,15 @@ cocoa.dt <- glob.dt[method == "cocoa"] %>%
 
 ```{r include=FALSE}
 n.fdr01.genes <- cocoa.dt[qv < .01, .(gene)] %>% unique %>% nrow
+n.fwer01.genes <- cocoa.dt[fwer < .01, .(gene)] %>% unique %>% nrow
+
 n.tot.genes <- cocoa.dt[, .(gene)] %>% unique %>% nrow
+
 n.fdr01.ct.genes <- cocoa.dt[qv < .01, .(n=length(unique(gene))), by=.(ct)] %>%
+    mutate(str = num.int(n) %&% " found in " %&% ct) %>%
+    arrange(factor(ct, rev(.marker.order$ro)))
+
+n.fwer01.ct.genes <- cocoa.dt[fwer < .01, .(n=length(unique(gene))), by=.(ct)] %>%
     mutate(str = num.int(n) %&% " found in " %&% ct) %>%
     arrange(factor(ct, rev(.marker.order$ro)))
 ```
@@ -507,6 +514,10 @@ cat("[PDF](" %&% .file %&% ")\n\n")
 ### CoCoA identified `r num.int(n.fdr01.genes)` genes are differentially-regulated between different AD conditions
 
 * `r num.int(n.fdr01.genes)` genes (`r num.round(100 * n.fdr01.genes / n.tot.genes)`%) consist of `r paste(n.fdr01.ct.genes$str, collapse=", ")`
+
+* `r num.int(n.fwer01.genes)` genes (`r num.round(100 * n.fwer01.genes / n.tot.genes)`%) consist of `r paste(n.fwer01.ct.genes$str, collapse=", ")`
+
+* `r n.tot.genes` genes in total.
 
 ```{r Fig_cocoa_vs_avg, fig.width=8, fig.height=2, results="asis"}
 .dt <-
@@ -692,17 +703,13 @@ show.gene.comparison <- function(.eg.dt) {
 ```
 
 ```{r include = FALSE}
-plot.genome <- function(.ct) {
+plot.genome <- function(.ct, fdr.cutoff = .01) {
 
     .dt <- cocoa.dt[ct == .ct]
 
     .aes <- aes(x = transcription_start_site, y = t.stat)
 
-    .dt.lab <-
-        .dt[order(.dt$wilcox.pv),
-            head(.SD, 3),
-            by = .(chromosome_name)] %>%
-        filter(qv < .1)
+    .dt.lab <- .dt[qv < fdr.cutoff]
 
     .gg.plot(.dt, .aes) +
         geom_hline(yintercept = 0, size = .2) +
@@ -1068,19 +1075,21 @@ for(.ct in ct.names) {
     .gg.save(.file, plot=plt, width=8, height=2)
 
     local.dt <- .read.cocoa(.ct %&% "_1")
-    .top.genes <- select.genes(.ct, 1) %>% head(5)
+    .top.genes <- select.genes(.ct, .01) %>% head(5)
 
-    p.list <-
-        lapply(.top.genes,
-               function(g) {
-                   eg.dt <- local.dt %>% filter(gene == g)
-                   show.one.gene(eg.dt, cocoa.dt[gene == g & ct == .ct])
-               })
-    
-    plt <- wrap_plots(p.list, nrow = 1)
-    .file <- fig.dir %&% "/Fig_Genomic_Top_" %&% .ct %&% ".pdf"
-    cat("\n\n[" %&% .ct %&% " top genes](" %&% .file %&% ")\n\n")
-    .gg.save(.file, plot=plt, width=10, height=6)    
+    if(length(.top.genes) >= 1) {
+        p.list <-
+            lapply(.top.genes,
+                   function(g) {
+                       eg.dt <- local.dt %>% filter(gene == g)
+                       show.one.gene(eg.dt, cocoa.dt[gene == g & ct == .ct])
+                   })
+        
+        plt <- wrap_plots(p.list, nrow = 1)
+        .file <- fig.dir %&% "/Fig_Genomic_Top_" %&% .ct %&% ".pdf"
+        cat("\n\n[" %&% .ct %&% " top genes](" %&% .file %&% ")\n\n")
+        .gg.save(.file, plot=plt, width=10, height=6)    
+    }
 }
 ```
 
