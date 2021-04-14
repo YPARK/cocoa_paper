@@ -41,3 +41,11 @@ Per	pericytes / endothelial cells	#FD7C21
 Eap	pericytes / endothelial cells	#FD7C21
 End	endothelial cells	#FD7C21
 Endo	endothelial cells	#FD7C21
+Ex-L2or3	excitatory neurons (L2/3)	#BDE29C
+Ex-L4	excitatory neurons (L4)	#BDE29C
+Ex-L5or6	excitatory neurons (L5/6)	#BDE29C
+Ex-L5or6-CC	excitatory neurons (L5/6,CC)	#BDE29C
+In-PV	inhibitory neurons (PV)	#389D34
+In-SST	inhibitory neurons (SST)	#389D34
+In-SV2C	inhibitory neurons (SV2C)	#389D34
+In-VIP	inhibitory neurons (VIP)	#389D34

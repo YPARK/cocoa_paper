@@ -12,10 +12,16 @@ library(tidyverse)
 library(data.table)
 
 .age.code <- function(x) {
-    if(nchar(x) == 0) return(NA)
-    if(x == "90+") return(2);
-    if(as.numeric(x) > 80) return(1);
+    if(x < 0) return(NA)
+    if(x > 90) return(2);
+    if(x > 80 && x <= 90) return(1);
     return(0)
+}
+
+.cog.code <- function(x) {
+    if(x == -9) return(NA)
+    if(x > 0) return(1)
+    if(x < 0) return(0)
 }
 
 .apoe.code <- function(x) {
@@ -29,10 +35,11 @@ library(data.table)
 
 .pheno[, age.death := sapply(age_death, .age.code)]
 .pheno[, apoe.e4 := sapply(apoe_genotype, .apoe.code)]
+.pheno[, cog := sapply(cogn_ep_random_slope, .cog.code)]
 
 .cols <- fread(meta.file, header=TRUE)
 .cols <- left_join(.cols, .pheno, by = "projid")
 
-.out <- .cols[, .(TAG, projid, pathoAD, apoe.e4, msex, age.death)] %>% na.omit
+.out <- .cols[, .(TAG, projid, pathoAD, apoe.e4, msex, age.death, cog)] %>% na.omit
 
 fwrite(.out, out.file, col.names=TRUE, row.names=FALSE, sep="\t")

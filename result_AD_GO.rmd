@@ -1,0 +1,355 @@
+---
+title: "Counterfactual Confounder Adjustment for Single-cell Differential Expression Analysis"
+author: "Yongjin Park"
+---
+
+```{r include=FALSE}
+library(tidyverse)
+library(data.table)
+library(patchwork)
+library(R.utils)
+source("R/Util-rmd.R")
+
+# Suppress summarise info
+options(dplyr.summarise.inform = FALSE)
+
+## document options
+fig.dir = "Fig/AD/GO"
+dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
+knitr::opts_chunk$set(fig.path = fig.dir, fig.width = 6, fig.height = 4)
+knitr::opts_chunk$set(dev.args = list(bg = "transparent"), echo = FALSE, include = FALSE)
+options(stringsAsFactors = FALSE)
+
+## helper functions
+.fread <- function(...) fread(..., header=FALSE)
+.fwrite <- function(...) fwrite(..., sep="\t", col.names=FALSE, row.names=FALSE)
+.read.mat <- function(...) .fread(...) %>% as.matrix
+.mkdir <- function(...) dir.create(..., recursive=TRUE, showWarnings=FALSE)
+```
+
+```{r include = FALSE}
+gene.ontology <- read.ontology()
+
+coding.genes <-
+    gene.ontology$coding %>%
+    rename(gene = hgnc_symbol) %>%
+    filter(chromosome_name %in% as.character(1:22))
+
+.colors <- fread("data/brain_colors.txt") %>%
+    mutate(hex = as.character(hex))
+
+gene.name.file <- "data/brain_2018-05-03/filtered_gene_row_names.txt.gz"
+```
+
+### Gene ontology enrichment
+
+```{r}
+test.go.enrichment <- function(.dt.pheno, .ct, .pheno,
+                               fdr.cutoff = NULL,
+                               direction = NULL,
+                               max.cutoff = Inf) {
+
+    gene.ontology <- read.ontology()
+
+    coding.genes <-
+        gene.ontology$coding %>%
+        rename(gene = hgnc_symbol)
+
+    .go.tab <- gene.ontology$go
+
+    .temp <- .dt.pheno %>%
+        left_join(coding.genes, by = "gene") %>%
+        na.omit
+
+    x.genes <- .temp$ensembl_gene_id %>% unique
+    y.genes <- .go.tab$ensembl_gene_id %>% unique
+    .genes <- intersect(x.genes, y.genes)
+
+    ntot <- length(.genes)
+
+    .temp <- .temp[celltype == .ct & pheno == .pheno]
+
+    .temp <- .temp[order(pv.cocoa),
+                   head(.SD, 1),
+                   by = .(ensembl_gene_id)]
+
+    .dir <- function(x) {
+        if(is.null(direction)) return(rep(TRUE, length(x)))
+        if(direction > 0) return(x > 0)
+        if(direction < 0) return(x < 0)
+    }
+
+    .sub.ct <- function(x) {
+        if(is.null(.ct)) return(rep(TRUE, length(x)))
+        return(x %in% .ct)
+    }
+
+    .sub.pheno <- function(x) {
+        if(is.null(.pheno)) return(rep(TRUE, length(x)))
+        return(x %in% .pheno)
+    }
+
+    ndrawn <- .temp[fdr.cocoa < fdr.cutoff &
+                    .dir(ADE.beta) &
+                    .sub.ct(celltype) &
+                    .sub.pheno(pheno)] %>% nrow
+
+    if(ndrawn < 1) return(data.table())
+
+    .merged <- merge(.temp, .go.tab, by = "ensembl_gene_id")
+
+    ret <-
+        .merged[, .(n.white = .N,
+                    n.black = ntot - .N,
+                    n.w.drawn = sum(fdr.cocoa < fdr.cutoff &
+                                    .dir(ADE.beta) &
+                                    .sub.ct(celltype) &
+                                    .sub.pheno(pheno)),
+                    n.drawn = ndrawn),
+                by = .(namespace_1003, go_id, name_1006)]
+
+    ret[,
+        pv := phyper(q = n.w.drawn,
+                     m = n.white,
+                     n = n.black,
+                     k = n.drawn,
+                     lower.tail=FALSE)
+        ]
+
+    ret[, n.null := n.drawn * (n.white + 1) / (n.white + n.black + 1)]
+
+    ret[n.white > 0 & n.white <= max.cutoff,
+        qv := p.adjust(pv, "fdr")]
+
+    ret[n.white > 0 & n.white <= max.cutoff,
+        fwer := p.adjust(pv, "holm")]
+
+    ret <- ret[str_length(name_1006) > 0 & n.w.drawn > 0] %>%
+        na.omit %>%
+        mutate(celltype = .ct) %>%
+        mutate(pheno = .pheno) %>%
+        as.data.table
+
+    return(ret)
+}
+
+test.all.go <- function(.dt,
+                        rm.shared = 2,
+                        rm.fdr.cutoff = .05,
+                        go.fdr.cutoff = .05,
+                        ...) {
+
+    ## For each phenotype, remove multi-celltype genes
+    nct.dt <- .dt[fdr.cocoa < rm.fdr.cutoff, .(nc = .N), by = .(gene, pheno)]
+
+    .temp <- .dt %>%
+        anti_join(nct.dt[nc >= rm.shared, .(gene)],
+                  by = c("gene")) %>%
+        as.data.table
+
+    .pheno.names <- unique(.temp[fdr.cocoa < rm.fdr.cutoff]$pheno)
+    .ct.names <- unique(.temp[fdr.cocoa < rm.fdr.cutoff]$celltype)
+
+    ret <- data.table()
+
+    for(.ct in .ct.names){
+        for(.pheno in .pheno.names) {
+
+            .dt.pheno <- .temp %>% filter(pheno == .pheno) %>% as.data.table
+
+            .go <- test.go.enrichment(.dt.pheno, .ct, .pheno, 
+                                      fdr.cutoff = go.fdr.cutoff)
+
+            ret <- rbind(ret, .go)
+        }
+    }
+
+    return(ret)
+}
+
+plot.go.heatmap <- function(go.ct.dt, .celltype.order, fdr.cutoff = .1, .ntop = NULL) {
+
+    if(is.null(.ntop)) {
+        go.show <- go.ct.dt[qv < fdr.cutoff & n.w.drawn > 2,
+                            .(name_1006)] %>% unique
+    } else {
+        go.show <- go.ct.dt[qv < fdr.cutoff & n.w.drawn > 2] %>%
+            group_by(celltype) %>%
+            top_n(.ntop, n.w.drawn/n.null) %>%
+            ungroup %>%
+            select(name_1006) %>%
+            unique
+    }
+
+    .dt <- merge(go.show, go.ct.dt) %>%
+        mutate(row = celltype, col = name_1006, weight = -log10(pv)) %>%
+        col.order(.ro = .celltype.order, ret.tab = TRUE) %>%
+        as.data.table
+
+    .aes <- aes(y = col, x = row,
+                size = -log10(pv),
+                fill = log10(n.w.drawn))
+
+    .scale.fill <-
+        scale_fill_distiller("#genes",
+                             palette = "RdPu",
+                             direction = 1,
+                             labels=function(x) round(10^(x)))
+
+    .scale.size <-
+        scale_size_continuous("p-value",
+                              breaks = seq(0,10,2),
+                              range=c(0, 3),
+                              labels=function(x) num.sci(10^(-x)))
+
+    plt <- .gg.plot(.dt, .aes) +
+        theme(axis.text.x = element_text(angle=90, vjust=1, hjust=1)) +
+        theme(legend.key.width = unit(.2, "lines")) +
+        theme(legend.key.height = unit(.5, "lines")) +
+        geom_point(pch = 22, stroke=.1) +
+        .scale.fill +
+        xlab("cell type") + ylab("gene ontology") +
+        .scale.size
+
+    .nrow <- length(unique(.dt$name_1006))
+    .ncol <- length(unique(.dt$celltype))
+    .lab <- max(sapply(.dt$name_1006, nchar))
+
+    list(plt = plt,
+         w = (.lab * .055 + .ncol * .05 + .5),
+         h = ceiling(.1 * .nrow + .25))
+}
+
+save.heatmap <- function(.obj, .file) {
+    .mkdir(dirname(.file))
+    .gg.save(filename=.file, .obj$plt, width = .obj$w, height = .obj$h)
+    return(.obj$plt)
+}
+```
+
+```{r read_glob_stat, echo=FALSE}
+.stat.files <- list.files("result/glob_stat/",
+                          pattern=".stat.gz",
+                          full.names=TRUE)
+
+stat.dt <-
+    lapply(.stat.files, fread, header=TRUE) %>%
+    do.call(what=rbind) %>%
+    filter(pheno != "age.death") %>% 
+    mutate(celltype = str_remove(celltype, "subtype-")) %>%
+    as.data.table
+
+stat.dt[,
+        fdr.cocoa := p.adjust(pv.cocoa, "fdr"),
+        by = .(pheno, celltype)]
+```
+
+### Full GO analysis results for the major cell types
+
+```{r}
+QV.CUTOFF <- 0.2
+NTOP <- 10
+RM.SHARED <- 2
+```
+
+```{r}
+.mkdir("Tab/AD")
+.file <- "Tab/AD/GO_major_types_result.csv.gz"
+
+if(!file.exists(.file)) {
+
+    .dt <-
+        stat.dt %>%
+        mutate(celltype = str_remove(celltype, "-[a-zA-Z-0-9]+")) %>% 
+        as.data.table
+
+    .dt <- .dt[order(abs(ADE.beta)/abs(ADE.se)),
+               tail(.SD,1),
+               by = .(gene, celltype, pheno)]
+
+    go.dt <- 
+        test.all.go(.dt, rm.shared = RM.SHARED,
+                    rm.fdr.cutoff = QV.CUTOFF,
+                    go.fdr.cutoff = QV.CUTOFF)
+
+    fwrite(go.dt,.file)
+}
+go.dt <- fread(.file)
+```
+
+```{r results="asis", include=TRUE}
+cat("* [Download](" %&% .file %&% ")")
+```
+
+```{r}
+FDR.CUTOFF = .05
+```
+
+####  FDR cutoff `r num.sci(FDR.CUTOFF)` showing at most top `r NTOP`
+
+```{r results="asis", include=TRUE}
+.ct.names <- c("Ex","In","OPC","Oligo","Astro","Microglia")
+
+for(.pheno in unique(go.dt$pheno)) {
+
+    .file <- fig.dir %&% "/Fig_GO_major_" %&% .pheno %&% ".pdf"
+    plt <-
+        go.dt[pheno == .pheno & n.white <= 200 & n.white >= 20] %>%
+        plot.go.heatmap(.ct.names, fdr.cutoff = FDR.CUTOFF, .ntop=NTOP) %>%
+        save.heatmap(.file)
+
+    cat("* [" %&% .pheno %&% "](" %&% .file %&% ")\n\n")
+}
+```
+
+### Full GO analysis results among the subtypes of neurons
+
+```{r}
+QV.CUTOFF <- 0.2
+NTOP <- 10
+RM.SHARED <- 2
+```
+
+```{r}
+.mkdir("Tab/AD")
+.file <- "Tab/AD/GO_neun_subtype.csv.gz"
+if(!file.exists(.file)) {
+
+    go.dt <-
+        stat.dt %>%
+        filter(str_starts(celltype , "Ex-") | str_starts(celltype , "In-")) %>% 
+        as.data.table %>%
+        test.all.go(rm.shared = RM.SHARED,
+                    rm.fdr.cutoff = QV.CUTOFF,
+                    go.fdr.cutoff = QV.CUTOFF)
+
+    fwrite(go.dt,.file)
+}
+go.dt <- fread(.file)
+```
+
+```{r results="asis", include=TRUE}
+cat("* [Download](" %&% .file %&% ")")
+```
+
+```{r}
+FDR.CUTOFF = .05
+```
+
+####  FDR cutoff `r num.sci(FDR.CUTOFF)` showing at most top `r NTOP`
+
+
+```{r results="asis", include=TRUE}
+.ct.names <- unique(go.dt$celltype)
+for(.pheno in unique(go.dt$pheno)) {
+
+    .file <- fig.dir %&% "/Fig_GO_Neun_" %&% .pheno %&% ".pdf"
+    plt <-
+        go.dt[pheno == .pheno & n.white <= 200 & n.white >= 20] %>%
+        plot.go.heatmap(.ct.names, fdr.cutoff = FDR.CUTOFF, .ntop=NTOP) %>%
+        save.heatmap(.file)
+
+    cat("* [" %&% .pheno %&% "](" %&% .file %&% ")\n\n")
+}
+```
+

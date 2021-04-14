@@ -36,8 +36,10 @@ log.msg <- function(...) {
 
 
 ################################################################
+.mkdir <- function(...) dir.create(..., recursive=TRUE, showWarnings=FALSE)
 
 .gg.save <- function(filename, ...) {
+    .mkdir(dirname(filename))
     if(file.exists(filename)) {
         log.msg('File already exits: %s', filename)
     } else {
@@ -55,17 +57,20 @@ log.msg <- function(...) {
         lemon::coord_capped_cart(left = 'both', bottom = 'both') +
         ggplot2::theme(plot.background = element_blank(),
                        plot.margin = unit(c(0,.5,0,.5), 'lines'),
-                       panel.background = element_rect(size = 0, fill = 'gray95'),
+                       plot.title = element_text(size = 10),
+                       panel.background = element_blank(),
                        strip.background = element_blank(),
+                       strip.text = element_text(size=4),
                        legend.background = element_blank(),
                        legend.text = element_text(size = 6),
                        legend.title = element_text(size = 6),
                        axis.title = element_text(size = 8),
-                       legend.key.width = unit(1, 'lines'),
-                       legend.key.height = unit(.2, 'lines'),
-                       legend.key.size = unit(1, 'lines'),
-                       axis.line = element_line(color = 'gray20', size = .5),
-                       axis.text = element_text(size = 6))
+                       legend.key.width = unit(.2, 'lines'),
+                       legend.key.height = unit(.5, 'lines'),
+                       legend.key.size = unit(.2, 'lines'),
+                       axis.line = element_line(color = 'gray20', size = .2),
+                       axis.ticks = element_line(color = 'gray20', size = .2),
+                       axis.text = element_text(size = 4))
 }
 
 .remove <- function(...) gsub(..., replacement = '')
@@ -164,7 +169,7 @@ row.order <- function(mat) {
         return(1:nrow(mat))
     }
 
-    D = proxy::dist(mat, method <- function(a,b) 1 - cor(a,b, method = 'spearman'))
+    D = suppressMessages(proxy::dist(mat, method <- function(a,b) 1 - cor(a,b, method = 'spearman')))
     D[!is.finite(D)] = 0
     h.out = hclust(D)
     o.out = cba::order.optimal(D, h.out$merge)
