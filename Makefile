@@ -116,10 +116,10 @@ result/subtype/bbknn_%.annot.gz: result/subtype/%.marker.gz $(BBKNN_SUBTYPE)
 # note: "result/phenotyped.txt.gz" contains TAG,IID,{Pheno_types}
 
 NPheno := $(shell [ -f result/phenotyped.txt.gz ] && gzip -cd result/phenotyped.txt.gz | head -n1 | awk '{ print (NF -2) }')
-pheno_ := 1 2 3 4 5
+pheno_ := $(shell seq 1 $(NPheno))
 EXT_ := resid_mu
 
-step2: $(foreach f, $(pheno_), $(foreach t, $(EXT_), result/cocoa/$(f).$(t).gz)) $(foreach f, $(pheno_), result/aggregate/$(f).mean.gz)
+step2: $(foreach f, $(pheno_), $(foreach t, $(EXT_), result/cocoa/$(f).$(t).gz result/cocoa_combined/$(f).$(t).gz))) $(foreach f, $(pheno_), result/aggregate/$(f).mean.gz result/aggregate_combined/$(f).mean.gz)
 
 result/phenotyped.txt.gz: R/find_phenotyped.R $(PHENO_DATA)
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
@@ -189,12 +189,38 @@ result/aggregate/%.mean.gz: result/temp/%.mtx.gz result/temp/%.cols.gz result/te
 	mmutil_aggregate_col --mtx result/temp/$*.mtx.gz --col result/temp/$*.cols.gz --annot result/temp/$*.annot.gz --lab result/temp/$*.lab.gz --ind result/temp/$*.ind.gz --verbose --out $(shell echo $@ | sed 's/.mean.gz//g')
 
 ################################################################
+
+# % = $(pheno_col)
+result/temp_combined/%.annot.gz: result/temp/%.cols.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	gzip -cd result/temp/$*.cols.gz | awk '{ print $$1 FS "combined" }' | gzip -c > $@
+
+# % = $(pheno_col)
+result/temp_combined/%.lab.gz: result/temp_combined/%.annot.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	gzip -cd $< | head -n1 | awk '{ print $$2 }' | gzip > $@
+
+# % = $(pheno_col)
+result/cocoa_combined/%.resid_mu.gz: result/temp/%.mtx.gz result/temp/%.cols.gz result/temp_combined/%.annot.gz result/temp/%.trt.gz result/temp_combined/%.lab.gz result/temp/%.ind.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	OMP_NUM_THREADS=16 mmutil_cfa_col --mtx result/temp/$*.mtx.gz --col result/temp/$*.cols.gz --annot result/temp_combined/$*.annot.gz --trt result/temp/$*.trt.gz --lab result/temp_combined/$*.lab.gz --ind result/temp/$*.ind.gz --verbose --knn 100 --rank 50 --log_scale --out $(shell echo $@ | sed 's/.resid_mu.gz//g')
+
+# % = $(pheno_col)
+result/aggregate_combined/%.mean.gz: result/temp/%.mtx.gz result/temp/%.cols.gz result/temp_combined/%.annot.gz result/temp/%.trt.gz result/temp_combined/%.lab.gz result/temp/%.ind.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	mmutil_aggregate_col --mtx result/temp/$*.mtx.gz --col result/temp/$*.cols.gz --annot result/temp_combined/$*.annot.gz --lab result/temp_combined/$*.lab.gz --ind result/temp/$*.ind.gz --verbose --out $(shell echo $@ | sed 's/.mean.gz//g')
+
+################################################################
 # Statistical test after adjustment
-GLOB_STAT := $(foreach f, $(pheno_), $(foreach s, stat, result/glob_stat/$(f).$(s).gz))
+GLOB_STAT := $(foreach f, $(pheno_), $(foreach s, stat, result/glob_stat/$(f).$(s).gz result/glob_stat_combined/$(f).$(s).gz))
 
 step3: $(GLOB_STAT)
 
 result/glob_stat/%.stat.gz: R/calc_glob_stat.R result/cocoa/%.ln_resid_mu.gz result/cocoa/%.ln_resid_mu_sd.gz result/cocoa/%.cf_mu.gz result/cocoa/%.cf_mu_sd.gz result/cocoa/%.mu_cols.gz result/aggregate/%.sum.gz result/aggregate/%.mean.gz result/aggregate/%.mu_cols.gz data/brain_2018-05-03/features.tsv.gz result/phenotyped.txt.gz
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	Rscript --vanilla $^ $* $@
+
+result/glob_stat_combined/%.stat.gz: R/calc_glob_stat.R result/cocoa_combined/%.ln_resid_mu.gz result/cocoa_combined/%.ln_resid_mu_sd.gz result/cocoa_combined/%.cf_mu.gz result/cocoa_combined/%.cf_mu_sd.gz result/cocoa_combined/%.mu_cols.gz result/aggregate_combined/%.sum.gz result/aggregate_combined/%.mean.gz result/aggregate_combined/%.mu_cols.gz data/brain_2018-05-03/features.tsv.gz result/phenotyped.txt.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	Rscript --vanilla $^ $* $@
 

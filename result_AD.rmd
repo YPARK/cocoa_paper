@@ -188,58 +188,68 @@ cat("[PDF](" %&% .file %&% ")\n\n")
 #### Basic statistics for cell type annotation
 
 ```{r include = FALSE}
-.tot.i.freq.dt <-
-    .annot.dt[, .(n = .N), by = .(projid)]
+.take.annot.freq <- function(.annot.dt) {
+    .tot.i.freq.dt <-
+        .annot.dt[, .(n = .N), by = .(projid)]
 
-.tot.ct.freq.dt <-
-    .annot.dt[, .(n = .N), by = .(ct)]
+    .tot.ct.freq.dt <-
+        .annot.dt[, .(n = .N), by = .(ct)]
 
-.ct.order <-
-    .tot.ct.freq.dt %>%
-    arrange(n) %>%
-    select(ct) %>%
-    left_join(.colors, by = "ct")
+    .ct.order <-
+        .tot.ct.freq.dt %>%
+        arrange(n) %>%
+        select(ct) %>%
+        left_join(.colors, by = "ct")
 
-.ct.freq.dt <- .annot.dt[, .(n = .N), by = .(ct, projid)]
+    .ct.freq.dt <- .annot.dt[, .(n = .N), by = .(ct, projid)]
 
-.projid <- .ct.freq.dt %>%
-    filter(ct == "Ex") %>%
-    arrange(desc(n)) %>%
-    select(projid) %>% unlist
+    .max.ct <- .ct.freq.dt[which.max(.ct.freq.dt$n), .(ct)] %>% unlist
 
-.ct.freq.dt <- .ct.freq.dt %>%
-    mutate(projid = factor(projid, .projid)) %>%
-    mutate(ct = factor(ct, .ct.order$ct, .ct.order$ct.name)) %>%
-    as.data.table
+    .projid <-
+        .ct.freq.dt %>%
+        filter(ct == .max.ct) %>%
+        arrange(desc(n)) %>%
+        select(projid) %>%
+        unlist
 
-.ct.freq.dt[, pr := n/sum(n), by = .(projid)]
+    .ct.freq.dt <- .ct.freq.dt %>%
+        mutate(projid = factor(projid, .projid)) %>%
+        mutate(ct = factor(ct, .ct.order$ct, .ct.order$ct.name)) %>%
+        as.data.table
+
+    .ct.freq.dt[, pr := n/sum(n), by = .(projid)]
+
+    .avg.ct.dt <-
+        .ct.freq.dt[,
+                    .(.mean = mean(n), .sd = sd(n), .max = max(n), .min = min(n),
+                      .mean.f = mean(pr), .sd.f = sd(pr), .max.f = max(pr), .min.f = min(pr)),
+                    by = .(ct)] %>%
+        mutate(str = num.round(.mean.f*100)  %&% "% (N=" %&% num.int(round(.mean)) %&% " $\\pm$ " %&% round(.sd) %&% ") cells for " %&% ct)
+
+    list(tot = .tot.i.freq.dt, avg.ct = .avg.ct.dt, ct.freq.dt = .ct.freq.dt, nind = length(.projid), ct.order = .ct.order)
+}
 ```
 
 ```{r Fig_CT_Freq, fig.width=5, fig.height=4}
-.avg.ct.dt <-
-    .ct.freq.dt[,
-                .(.mean = mean(n), .sd = sd(n), .max = max(n), .min = min(n),
-                  .mean.f = mean(pr), .sd.f = sd(pr), .max.f = max(pr), .min.f = min(pr)),
-                by = .(ct)] %>%
-    mutate(str = num.round(.mean.f*100)  %&% "% (N=" %&% num.int(round(.mean)) %&% " $\\pm$ " %&% round(.sd) %&% ") cells for " %&% ct)
+freq <- .take.annot.freq(.annot.dt)
 
 p2 <- 
-    .gg.plot(.ct.freq.dt, aes(x = projid, y = pr, fill = ct)) +
+    .gg.plot(freq$ct.freq.dt, aes(x = projid, y = pr, fill = ct)) +
     geom_bar(stat="identity") +
     theme(axis.text.x = element_blank()) +
     theme(axis.ticks.x = element_blank()) +
-    xlab(length(.projid) %&% " individuals") +
+    xlab(freq$nind %&% " individuals") +
     ylab("Cell type fraction") +
-    scale_fill_manual(values = .ct.order$hex)
+    scale_fill_manual(values = freq$ct.order$hex)
 
 p1 <- 
-    .gg.plot(.ct.freq.dt, aes(x = projid, y = n, fill = ct)) +
+    .gg.plot(freq$ct.freq.dt, aes(x = projid, y = n, fill = ct)) +
     geom_bar(stat="identity") +
     theme(axis.text.x = element_blank()) +
     theme(axis.ticks.x = element_blank()) +
-    xlab(length(.projid) %&% " individuals") +
+    xlab(freq$nind %&% " individuals") +
     ylab("#Cells") +
-    scale_fill_manual(values = .ct.order$hex)
+    scale_fill_manual(values = freq$ct.order$hex)
 
 plt <- p1 / p2
 
@@ -252,7 +262,7 @@ print(plt)
 cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
-* `r num.int(round(mean(.tot.i.freq.dt$n)))` cells per individual: `r paste(.avg.ct.dt$str, collapse=", ")` on average.
+* `r num.int(round(mean(freq$tot$n)))` cells per individual: `r paste(freq$avg.ct$str, collapse=", ")` on average.
 
 #### Correlation with the annotations of Mathys _et al._
 
@@ -310,6 +320,41 @@ print(plt)
 cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
+
+```{r Fig_Ex_CT_Freq}
+freq <- .take.annot.freq(.Ex.annot.dt)
+
+p2 <- 
+    .gg.plot(freq$ct.freq.dt, aes(x = projid, y = pr, fill = ct)) +
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_blank()) +
+    theme(axis.ticks.x = element_blank()) +
+    xlab(freq$nind %&% " individuals") +
+    ylab("Cell type fraction") +
+    scale_fill_manual(values = freq$ct.order$hex)
+
+p1 <- 
+    .gg.plot(freq$ct.freq.dt, aes(x = projid, y = n, fill = ct)) +
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_blank()) +
+    theme(axis.ticks.x = element_blank()) +
+    xlab(freq$nind %&% " individuals") +
+    ylab("#Cells") +
+    scale_fill_manual(values = freq$ct.order$hex)
+
+plt <- p1 / p2
+
+print(plt)
+.file <- fig.dir %&% "/Fig_Ex_CT_Freq.pdf"
+.gg.save(.file, plot=plt, width = 5, height = 4)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+* `r num.int(round(mean(freq$tot$n)))` cells per individual: `r paste(freq$avg.ct$str, collapse=", ")` on average.
+
 ### Inhibitory neuron subtypes
 
 ```{r fig.width=3, fig.height=8}
@@ -339,6 +384,41 @@ print(plt)
 cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
+
+```{r Fig_In_CT_Freq}
+freq <- .take.annot.freq(.In.annot.dt)
+
+p2 <- 
+    .gg.plot(freq$ct.freq.dt, aes(x = projid, y = pr, fill = ct)) +
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_blank()) +
+    theme(axis.ticks.x = element_blank()) +
+    xlab(freq$nind %&% " individuals") +
+    ylab("Cell type fraction") +
+    scale_fill_manual(values = freq$ct.order$hex)
+
+p1 <- 
+    .gg.plot(freq$ct.freq.dt, aes(x = projid, y = n, fill = ct)) +
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_blank()) +
+    theme(axis.ticks.x = element_blank()) +
+    xlab(freq$nind %&% " individuals") +
+    ylab("#Cells") +
+    scale_fill_manual(values = freq$ct.order$hex)
+
+plt <- p1 / p2
+
+print(plt)
+.file <- fig.dir %&% "/Fig_In_CT_Freq.pdf"
+.gg.save(.file, plot=plt, width = 5, height = 4)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+* `r num.int(round(mean(freq$tot$n)))` cells per individual: `r paste(freq$avg.ct$str, collapse=", ")` on average.
+
 ## Differentially Expressed Genes
 
 ```{r}
@@ -353,7 +433,7 @@ cat("[PDF](" %&% .file %&% ")\n\n")
 .names <- names(fread("result/phenotyped.txt.gz",header=TRUE))[-(1:2)]
 .idx <- sapply(.stat.files, basename) %>% str_remove_all(".stat.gz")
 .names <- .names[as.integer(.idx)]
-cat("* [Download phenotype " %&% .names %&% "](" %&% .stat.files %&% ")\n\n")
+cat("* [Tab for the associations with " %&% .names %&% "](" %&% .stat.files %&% ")\n\n")
 ```
 
 ```{r read_full_stat}
@@ -383,6 +463,146 @@ stat.dt[,
 stat.dt[,
         fdr.cocoa := p.adjust(pv.cocoa, "fdr"),
         by = .(pheno, celltype)]
+```
+
+```{r read_combined_stat}
+stat.combined.dt <- fread("result/glob_stat_combined/1.stat.gz")
+stat.combined.dt[tot.1 >= 100 | tot.0 >= 100,
+                 c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+                 by = .(pheno, celltype)]
+
+stat.combined.dt[,
+                 fwer.cocoa := p.adjust(pv.cocoa, "holm"),
+                 by = .(pheno, celltype)]
+
+stat.combined.dt[,
+                 fdr.cocoa := p.adjust(pv.cocoa, "fdr"),
+                 by = .(pheno, celltype)]
+```
+
+#### The number of associated genes for PathoAD 
+
+```{r}
+n.fdr01.genes <- stat.dt[pheno == "pathoAD" & fdr.cocoa < .01, .(gene)] %>%
+    unique %>% nrow
+
+n.fwer01.genes <- stat.dt[pheno == "pathoAD" & fwer.cocoa < .01, .(gene)] %>%
+    unique %>% nrow
+
+n.tot.genes <- stat.dt[, .(gene)] %>% unique %>% nrow
+
+n.fdr01.celltype.genes <- stat.dt[pheno == "pathoAD" & fdr.cocoa < .01,
+                            .(n=length(unique(gene))), by=.(celltype)] %>%
+    mutate(str = num.int(n) %&% " found in " %&% celltype) %>%
+    select(str) %>%
+    unlist %>%
+    paste(collapse =", ")
+
+n.fwer01.celltype.genes <- stat.dt[pheno == "pathoAD" & fwer.cocoa < .01,
+                             .(n=length(unique(gene))), by=.(celltype)] %>%
+    mutate(str = num.int(n) %&% " found in " %&% celltype) %>%
+    select(str) %>%
+    unlist %>% 
+    paste(collapse =", ")
+```
+
+* `r num.int(n.fdr01.genes)` genes (`r num.round(100 * n.fdr01.genes / n.tot.genes)`%) consist of `r paste(n.fdr01.celltype.genes, collapse=", ")` across 
+
+* `r num.int(n.fwer01.genes)` genes (`r num.round(100 * n.fwer01.genes / n.tot.genes)`%) consist of `r paste(n.fwer01.celltype.genes, collapse=", ")`
+
+* `r n.tot.genes` genes in total.
+
+
+#### Trending the number of discoveries with different p-value cutoffs
+
+```{r}
+pv.cutoff <- 10^(-seq(2,6,by=.25))
+
+.fun <- function(.cutoff, .dt) {
+    ret <-
+        .dt[pv.cocoa < .cutoff, .(n = .N), by = .(celltype, pheno)] %>%
+        mutate(cutoff = .cutoff, method = "cocoa")
+    ret2 <-
+        .dt[pv.tot < .cutoff, .(n = .N), by = .(celltype, pheno)] %>%
+        mutate(cutoff = .cutoff, method = "tot")
+    rbind(ret, ret2)
+}
+
+.fun2 <- function(.cutoff, .dt) {
+    ret <-
+        .dt[pv.cocoa < .cutoff, .(n = length(unique(gene))), by = .(pheno)] %>%
+        mutate(cutoff = .cutoff, method = "cocoa")
+    ret2 <-
+        .dt[pv.tot < .cutoff, .(n = length(unique(gene))), by = .(pheno)] %>%
+        mutate(cutoff = .cutoff, method = "tot")
+    rbind(ret, ret2)
+}
+
+.dt1 <- lapply(pv.cutoff, .fun, .dt = stat.dt) %>% do.call(what = rbind)
+.dt1.tot <- lapply(pv.cutoff, .fun2, .dt = stat.dt) %>% do.call(what = rbind) %>%
+    mutate(celltype = "stratified")
+.dt2 <- lapply(pv.cutoff, .fun, .dt = stat.combined.dt) %>% do.call(what = rbind)
+```
+
+```{r Fig_pvalue_cutoff_celltype, fig.width=3, fig.height=3}
+.ct.order <-
+    .dt1[, head(.SD, 1), by = .(celltype)] %>%
+    arrange(n) %>%
+    select(celltype) %>%
+    unlist
+
+.temp <- .colors[match(.ct.order, .colors$ct), ]
+
+.dt1 <- .dt1 %>%
+    mutate(celltype = factor(celltype, .ct.order, .temp$ct.name))
+
+.fill <- .temp[, "hex"] %>%
+    unlist %>%
+    as.character
+
+plt <- 
+    .gg.plot(.dt1[pheno == "pathoAD"], aes(x=log10(cutoff), y=n, fill=celltype)) +
+    ggtitle("pathoAD") +
+    facet_grid(method~., scales="free", space="free") +
+    theme(legend.position=c(0,1), legend.justification=c(0,1)) +
+    geom_bar(stat="identity") +
+    ylab("number of genes discovered in each cell type") +
+    xlab("p-value cutoff") +
+    scale_fill_manual(values = .fill) +
+    scale_colour_manual(values = .fill)
+
+print(plt)
+.file <- fig.dir %&% "/Fig_pvalue_cutoff_celltype.pdf"
+.gg.save(.file, plot=plt, width=3, height=3)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+```{r Fig_pvalue_cutoff_discovery, fig.width=3, fig.height=3}
+.df <- rbind(.dt2, .dt1.tot) %>%
+    mutate(celltype = factor(celltype, c("stratified", "combined")))
+
+plt <-
+    .gg.plot(.df[pheno == "pathoAD"], aes(x = log10(cutoff), y = n, fill = celltype)) +
+    ggtitle("pathoAD") +
+    facet_grid(method~., scales="free", space="free") +
+    scale_x_continuous(labels = function(x) num.sci(10^x)) +
+    theme(legend.position=c(0,1), legend.justification=c(0,1)) +
+    geom_line() +
+    geom_point(pch=21) +
+    scale_fill_manual(values=c("gray20", "white")) +
+    ylab("number of unqiue genes discovered") +
+    xlab("p-value cutoff")
+
+print(plt)
+.file <- fig.dir %&% "/Fig_pvalue_cutoff_discovery.pdf"
+.gg.save(.file, plot=plt, width=3, height=3)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
 ### Check: Histogram of p-values
@@ -638,6 +858,9 @@ show.gene.plot <- function(g, .pheno, .lab, .ct = NULL) {
             lfsr < .01,
             .(gene, celltype)] %>%
     unique %>%
+    mutate(ct = celltype) %>% 
+    left_join(.colors) %>% 
+    select(-ct) %>% 
     as.data.frame
 
 .save.example <- function(gi) {
@@ -657,14 +880,73 @@ show.gene.plot <- function(g, .pheno, .lab, .ct = NULL) {
 .files <- sapply(1:nrow(.gene.ct), .save.example)
 ```
 
+#### A genomic view combining all the cell types
+
+```{r}
+.onto <- read.ontology()
+gene.info <- .onto$coding
+```
+
+```{r Fig_genomic_combined, fig.width=8, fig.height=4}
+.dt <- stat.dt[!is.na(ADE.beta)]
+
+.dt <- .dt[order(stat.dt$pv.cocoa), head(.SD, 1), by = .(pheno, gene)] %>%
+    filter(pheno == .pheno) %>%
+    mutate(hgnc_symbol = gene) %>% 
+    left_join(gene.info) %>% 
+    select(-hgnc_symbol) %>% 
+    mutate(chr = factor(chromosome_name, c(1:22,"X","Y","MT"))) %>% 
+    filter(!is.na(chr)) %>% 
+    as.data.table
+
+.dt.highlight <- .gene.ct %>% left_join(.dt) %>% na.omit %>% as.data.table
+.dt.lab <- .dt.highlight %>% filter(celltype == "Microglia")
+
+.ct.order <- sort(unique(.dt.highlight$celltype))
+
+.temp <- .colors[match(.ct.order, .colors$ct), ]
+
+.dt.highlight <- .dt.highlight %>%
+    mutate(celltype = factor(celltype, .ct.order, .temp$ct.name)) %>%
+    as.data.table
+
+.fill <- .temp[, "hex"] %>%
+    unlist %>%
+    as.character
+
+plt <- 
+    .gg.plot(anti_join(.dt, .gene.ct), aes(x=transcription_start_site, y=ADE.beta)) +
+    ylab("Average Disese Effect") +
+    theme(axis.ticks.x = element_blank()) +
+    theme(axis.text.x = element_blank()) +
+    theme(legend.position = "bottom") +
+    facet_grid(.~chr, space="free", scales="free") +    
+    geom_point(colour = "gray", stroke=0, size=.5) +
+    geom_point(aes(fill = celltype), data = .dt.highlight, pch=21, stroke = .1, size = 1.5) +
+    geom_text_repel(aes(label = gene), data = .dt.lab, size=2) +
+    scale_fill_manual(values = .fill)
+
+print(plt)
+
+.file <- fig.dir %&% "/Fig_genomic_combined.pdf"
+.gg.save(.file, plot=plt, width=8, height=4)
+```
+
+```{r echo=FALSE, results="asis"}
+cat("\n\n[Combined genomic view](" %&% .file %&% ")\n\n")
+```
+
+
 ```{r results="asis"}
 as_tibble(.gene.ct) %>%
     mutate(file = .files) %>% 
     left_join(stat.dt[pheno == .pheno], by = c("gene","celltype")) %>%
-    select(pheno, gene, celltype, ADE.beta, ADE.se, lfdr, lfsr, pv.cocoa, file) %>%
+    mutate(celltype = ct.name) %>% 
+    mutate(ADE = num.round(ADE.beta) %&% " \\pm " %&% num.sci(ADE.se)) %>% 
+    mutate(`p-value` = num.sci(pv.cocoa)) %>% 
+    select(pheno, gene, celltype, ADE, lfdr, lfsr, `p-value`, file) %>%
     mutate(lfdr = num.sci(lfdr),
            lfsr = num.sci(lfsr),
-           pv.cocoa = num.sci(pv.cocoa),
            file) %>%
     mutate(file = "[PDF](" %&% file %&% ")") %>% 
     arrange(gene, celltype) %>% 
@@ -672,4 +954,5 @@ as_tibble(.gene.ct) %>%
     kableExtra::collapse_rows(columns = c(1, 2), valign = "top") %>%
     kableExtra::kable_styling(c("striped", "condensed"), full_width=FALSE, font_size = 10)
 ```
+
 
