@@ -480,7 +480,7 @@ stat.combined.dt[,
                  by = .(pheno, celltype)]
 ```
 
-#### The number of associated genes for PathoAD 
+#### The number of genes associated with PathoAD by non-parametric ranksum test
 
 ```{r}
 n.fdr01.genes <- stat.dt[pheno == "pathoAD" & fdr.cocoa < .01, .(gene)] %>%
@@ -510,7 +510,7 @@ n.fwer01.celltype.genes <- stat.dt[pheno == "pathoAD" & fwer.cocoa < .01,
 
 * `r num.int(n.fwer01.genes)` genes (`r num.round(100 * n.fwer01.genes / n.tot.genes)`%) consist of `r paste(n.fwer01.celltype.genes, collapse=", ")`
 
-* `r n.tot.genes` genes in total.
+* `r num.int(n.tot.genes)` genes in total.
 
 
 #### Trending the number of discoveries with different p-value cutoffs
@@ -704,12 +704,41 @@ print(plt)
 cat("[PDF](" %&% .file %&% ")\n\n")
 ```
 
+### The number of genes identified by significant average disease effect (ADE) (local FSR 5%) and non-parametric rank test (Wilcoxon FDR 5%): `r num.int(nrow(stat.dt[lfsr < .05 & fdr.cocoa < .05, .(gene)] %>% unique))`
 
-### Basic count
+```{r Fig_count_5, fig.width=3, fig.height=3}
+.count.df <-
+    stat.dt[lfsr < .05 & fdr.cocoa < .05,
+            .(n = .N), by = .(celltype, pheno)] %>%
+    group_by(celltype) %>%
+    mutate(freq = n / sum(n)) %>% 
+    ungroup() %>% 
+    mutate(row = pheno, col = celltype, weight = log10(freq)) %>%
+    order.pair(ret.tab=TRUE)
+
+plt <- 
+    .gg.plot(.count.df, aes(x=row, y=col, fill=weight, label=num.int(n))) +
+    geom_tile(size=.1, colour="gray20") +
+    geom_text(size=2, colour="white") +
+    xlab("phenotype") + ylab("celltype") +
+    scale_fill_distiller("Pr(assoc|celltype)",
+                         direction=1, palette = "Blues",
+                         labels=function(x) num.round(10^x))
+
+print(plt)
+.file <- fig.dir %&% "/Fig_count_5.pdf"
+.gg.save(.file, plot=plt, width=3, height=3)
+```
+
+```{r results="asis"}
+cat("[PDF](" %&% .file %&% ")\n\n")
+```
+
+### The number of genes identified by significant average disease effect (ADE) (local FSR 1%) and non-parametric rank test (Wilcoxon FDR 1%): `r num.int(nrow(stat.dt[lfsr < .01 & fdr.cocoa < .01, .(gene)] %>% unique))`
 
 ```{r Fig_count, fig.width=3, fig.height=3}
 .count.df <-
-    stat.dt[lfsr < .05 & fdr.cocoa < .05,
+    stat.dt[lfsr < .01 & fdr.cocoa < .01,
             .(n = .N), by = .(celltype, pheno)] %>%
     group_by(celltype) %>%
     mutate(freq = n / sum(n)) %>% 
@@ -734,6 +763,7 @@ print(plt)
 ```{r results="asis"}
 cat("[PDF](" %&% .file %&% ")\n\n")
 ```
+
 
 
 ### Show top genes for each cell type and phenotype
