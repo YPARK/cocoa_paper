@@ -116,7 +116,7 @@ plot.go.heatmap <- function(go.ct.dt, .celltype.order, fdr.cutoff = .1, .ntop = 
     .lab <- max(sapply(.dt$term, nchar))
 
     list(plt = plt,
-         w = (.lab * .055 + .ncol * .05 + .5),
+         w = (.lab * .05 + .ncol * .05 + .5),
          h = ceiling(.1 * .nrow + .25))
 }
 
@@ -182,6 +182,17 @@ cat("* [Download](" %&% .file %&% ")")
 ```
 
 ```{r}
+.ct.order <- c("Ex-L2or3", "Ex-L4", "Ex-L5or6", "Ex-L5or6-CC",
+               "In-PV", "In-SST", "In-SV2C", "In-VIP",
+               "OPC", "Oligo", "Microglia", "Astro")
+
+.col.tab <- fread("data/brain_colors.txt") %>%
+    filter(ct %in% .ct.order) %>% 
+    mutate(ct = factor(ct, .ct.order)) %>%
+    arrange(ct)
+
+.ct.lab <- .col.tab$ct.name
+
 .temp <-
     stat.dt %>%
     left_join(coding.genes) %>% 
@@ -193,24 +204,27 @@ count.df <-
     .temp[, .(n = .N), by = .(pheno, celltype)] %>%
     group_by(pheno) %>%
     mutate(weight = log10(n)) %>%
-    ungroup()
+    ungroup() %>% 
+    mutate(ct = factor(celltype, .ct.order, .ct.lab)) %>% 
+    left_join(.col.tab)
 ```
 
-### Using average `r num.int(round(mean(count.df$n)))` $\pm$ `r  num.int(round(sd(count.df$n)))` protein coding genes as a discovery set (FDR 20%)
+### Using average `r num.int(round(mean(count.df$n)))` $\pm$ `r  num.int(round(sd(count.df$n)))` protein coding genes as a discovery set (FDR `r round(100 * fdr.cutoff)` %)
 
-```{r Fig_gene_count_GO, fig.width=4, fig.height=1.8}
+```{r Fig_gene_count_GO, fig.width=2.5, fig.height=3}
 plt <-
-    .gg.plot(count.df, aes(x=celltype, y=pheno, fill=weight, label=n)) +
-    geom_tile() +
-    geom_text(size=3) +
+    .gg.plot(count.df, aes(x=ct, y=n, fill=ct, label=n)) +
+    ylab("#genes (FDR < " %&% fdr.cutoff %&% ")") + xlab("cell type") +
     theme(axis.text.x = element_text(angle=90, vjust=0, hjust=0)) +
     scale_x_discrete(position = "top") +
-    scale_fill_distiller(palette=4, labels=function(x) round(10^x)) +
-    ylab("phenotype") + xlab("cell type")
+    facet_grid(pheno~., scales = "free") +
+    geom_bar(stat="identity") +
+    geom_text(size=2) +
+    scale_fill_manual(values=.col.tab$hex, guide=FALSE)
 
 print(plt)
 .file <- fig.dir %&% "/Fig_gene_count.pdf"
-.gg.save(.file, plot=plt, width=4, height=1.8)
+.gg.save(.file, plot=plt, width=2.5, height=3)
 ```
 
 ```{r results="asis", include=TRUE}
@@ -218,26 +232,28 @@ cat("* [PDF](" %&% .file %&% ")")
 ```
 
 ```{r}
-FDR.CUTOFF = .05
+FDR.CUTOFF = 1e-2
 NTOP = 10
 ```
 
 ####  FDR cutoff `r num.sci(FDR.CUTOFF)` showing at most top `r NTOP`
 
 ```{r results="asis", include=TRUE}
-.ct.names <- c("Ex-L2or3", "Ex-L4", "Ex-L5or6", "Ex-L5or6-CC",
-               "In-PV", "In-SST", "In-SV2C", "In-VIP",
-               "Microglia", "OPC", "Oligo", "Astro")
-
 for(.pheno in unique(go.dt$pheno)) {
 
-    .file <- fig.dir %&% "/Fig_GO_major_" %&% .pheno %&% ".pdf"
-    plt <-
-        go.dt[pheno == .pheno & numInCat <= 200 & numInCat >= 10] %>%
-        plot.go.heatmap(.ct.names, fdr.cutoff = FDR.CUTOFF, .ntop=NTOP) %>%
-        save.heatmap(.file)
+    for(.onto in c("BP", "MF", "CC")) {
 
-    cat("* [" %&% .pheno %&% "](" %&% .file %&% ")\n\n")
+        .file <- fig.dir %&% "/Fig_GO_" %&% .onto %&% "_" %&% .pheno %&% ".pdf"
+        plt <-
+            go.dt[pheno == .pheno &
+                  numInCat <= 500 &
+                  numInCat >= 100 &
+                  ontology == .onto] %>%
+            plot.go.heatmap(.ct.order, fdr.cutoff = FDR.CUTOFF, .ntop=NTOP) %>%
+            save.heatmap(.file)
+
+        cat("* [" %&% .pheno %&% " " %&% .onto %&% "](" %&% .file %&% ")\n\n")
+    }
 }
 ```
 
