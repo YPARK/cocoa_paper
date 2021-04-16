@@ -182,8 +182,8 @@ row.order <- function(mat) {
 col.order <- function(pair.tab, .ro, ret.tab = FALSE) {
 
     M = pair.tab %>%
-        select(row, col, weight) %>%
-        mutate(row = factor(row, .ro)) %>%
+        dplyr::select(row, col, weight) %>%
+        dplyr::mutate(row = factor(row, .ro)) %>%
         tidyr::spread(key = col, value = weight, fill = 0)
 
     co = order(apply(M[, -1], 2, which.max), decreasing = TRUE)
@@ -205,7 +205,7 @@ order.pair <- function(pair.tab, ret.tab=FALSE) {
     require(tidyr)
     require(dplyr)
     
-    .tab = pair.tab %>% select(row, col, weight)
+    .tab = pair.tab %>% dplyr::select(row, col, weight)
 
     M = .tab %>% tidyr::spread(key = col, value = weight, fill = 0)
     rr = M[, 1] %>% unlist(use.names = FALSE)
