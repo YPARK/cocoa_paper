@@ -506,9 +506,9 @@ n.fwer01.celltype.genes <- stat.dt[pheno == "pathoAD" & fwer.cocoa < .01,
     paste(collapse =", ")
 ```
 
-* `r num.int(n.fdr01.genes)` genes (`r num.round(100 * n.fdr01.genes / n.tot.genes)`%) consist of `r paste(n.fdr01.celltype.genes, collapse=", ")` across 
+* DEGs with FDR controlled at 1%: `r num.int(n.fdr01.genes)` genes (`r num.round(100 * n.fdr01.genes / n.tot.genes)`%) consist of `r paste(n.fdr01.celltype.genes, collapse=", ")` across 
 
-* `r num.int(n.fwer01.genes)` genes (`r num.round(100 * n.fwer01.genes / n.tot.genes)`%) consist of `r paste(n.fwer01.celltype.genes, collapse=", ")`
+* DEGs with FWER controlled at 1%: `r num.int(n.fwer01.genes)` genes (`r num.round(100 * n.fwer01.genes / n.tot.genes)`%) consist of `r paste(n.fwer01.celltype.genes, collapse=", ")`
 
 * `r num.int(n.tot.genes)` genes in total.
 
