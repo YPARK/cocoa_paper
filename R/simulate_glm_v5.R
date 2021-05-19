@@ -13,6 +13,8 @@ ncell.ind <- 10
 pve.1 <- 0.3
 pve.c <- 0.3
 pve.a <- 0.0
+pve.f <- 0.0
+
 rseed <- 13
 rho.a <- 2
 rho.b <- 2
@@ -23,7 +25,7 @@ rho.b <- 2
 
 argv <- commandArgs(trailingOnly = TRUE)
 
-if(length(argv) != 13)
+if(length(argv) != 14)
 {
     q()
 }
@@ -35,20 +37,23 @@ ncovar.conf <- as.integer(argv[4])
 ncovar.batch <- as.integer(argv[5])
 ncell.ind <- as.integer(argv[6])
 
-pve.1 <- as.numeric(argv[7])
-pve.c <- as.numeric(argv[8])
-pve.a <- as.numeric(argv[9])
+pve.1 <- as.numeric(argv[7]) # disease variability
+pve.c <- as.numeric(argv[8]) # confounder variability on expression
+pve.a <- as.numeric(argv[9]) # confounder variability on label
+pve.f <- as.numeric(argv[10]) # feedback variability
 
-rseed <- as.numeric(argv[10])
+rseed <- as.numeric(argv[11])
 
-rho.a <- as.numeric(argv[11])
-rho.b <- as.numeric(argv[12])
+rho.a <- as.numeric(argv[12])
+rho.b <- as.numeric(argv[13])
 
-out <- argv[13]
+out <- argv[14]
 
 dir.create(dirname(out), recursive=TRUE, showWarnings=FALSE)
 
 set.seed(rseed)
+
+stopifnot((pve.1 + pve.c + pve.f) < 1)
 
 #' write data file
 .write <- function(...) {
@@ -94,7 +99,7 @@ set.seed(rseed)
 #' sample model parameters
 #' @param nind number of individuals/samples
 #' @param ncovar.conf number of covar shared 
-#' @param ncovar.batch number of covar on mu, batch effect
+#' @param ncovar.batch number of covar on lambda, batch effect
 #' @param ngenes number of genes/features
 #' @param ncausal number of causal genes
 sample.seed.data <- function(nind, ncovar.conf, ncovar.batch, pve) {
@@ -106,9 +111,9 @@ sample.seed.data <- function(nind, ncovar.conf, ncovar.batch, pve) {
     }
 
     if(ncovar.batch > 0) {
-        xx.mu <- .rnorm(nind, ncovar.batch) # covariates
+        xx.lambda <- .rnorm(nind, ncovar.batch) # covariates
     } else {
-        xx.mu <- .zero(nind, 1) # empty
+        xx.lambda <- .zero(nind, 1) # empty
     }
 
     ## Biased assignment mechanism
@@ -121,16 +126,16 @@ sample.seed.data <- function(nind, ncovar.conf, ncovar.batch, pve) {
 
     ww <- rbinom(prob=.sigmoid(logit), n=nind, size=1)
 
-    list(w = ww, lib = true.logit, x = xx, x.mu = xx.mu)
+    list(w = ww, lib = true.logit, x = xx, x.lambda = xx.lambda)
 }
 
 .param <- sample.seed.data(nind, ncovar.conf, ncovar.batch, pve.a)
 
 nn <- length(.param$w)
 
-xx <- .param$x       # covariates shared
-xx.mu <- .param$x.mu # covariates on mu only 
-ww <- .param$w       # stochastic assignment
+xx <- .param$x               # covariates shared --> confounding
+xx.lambda <- .param$x.lambda # covariates on lambda only --> non-confounding
+ww <- .param$w               # stochastic assignment
 
 causal <- sample(ngene, ncausal) # causal genes
 
@@ -145,49 +150,56 @@ sample.w.rand <- function(j) {
     return(matrix(r * rnorm(1), ncol=1))
 }
 
-ln.mu.w <- sapply(1:ngene, sample.w.rand)
-ln.mu.w[, causal] <- sapply(1:ncausal, function(j) ww * rnorm(1))
+ln.lambda.w <- sapply(1:ngene, sample.w.rand)
+ln.lambda.w[, causal] <- sapply(1:ncausal, function(j) ww * rnorm(1))
 
 #########################
 ## confounding effects ##
 #########################
 
-ln.mu.x <- xx %*% .rand(ncol(xx), ngene)
+ln.lambda.x <- xx %*% .rand(ncol(xx), ngene)
 
 #########################
 ## other batch effects ##
 #########################
 
-.batch <- xx.mu %*% .rand(ncol(xx.mu), ngene)
+.batch <- xx.lambda %*% .rand(ncol(xx.lambda), ngene)
 
-ln.mu.x <- ln.mu.x + .batch
+ln.lambda.x <- ln.lambda.x + .batch
+
+#########################
+## Add feedback effect ##
+#########################
+
+.u <- rsvd::rsvd(ln.lambda.w[, causal, drop = FALSE], k=1)$u
+ln.feedback <- .u %*% .rnorm(1, ngene)
 
 ########################
 ## unstructured noise ##
 ########################
 
-ln.mu.eps <- .rnorm(nn, ngene)
+ln.lambda.eps <- .rnorm(nn, ngene)
 
 #############################
 ## combine all the effects ##
 #############################
 
-ln.mu <- .scale(ln.mu.w) * sqrt(pve.1) +
-    .scale(ln.mu.x) * sqrt(pve.c) +
-    .scale(ln.mu.eps) * sqrt(1 - pve.1 - pve.c)
+ln.lambda <-
+    .scale(ln.lambda.w) * sqrt(pve.1) +
+    .scale(ln.lambda.x) * sqrt(pve.c) +
+    .scale(ln.feedback) * sqrt(pve.f) +
+    .scale(ln.lambda.eps) * sqrt(1 - pve.1 - pve.c - pve.f)
 
-ln.mu <- .scale(ln.mu)
-
-mu <- exp(ln.mu)
+lambda <- exp(ln.lambda)
 
 ##########################
 ## unconfounded signals ##
 ##########################
 
-clean.ln.mu <- .scale(ln.mu.w) * sqrt(pve.1) +
-    .scale(ln.mu.eps) * sqrt(1 - pve.1)
+clean.ln.lambda <- .scale(ln.lambda.w) * sqrt(pve.1) +
+    .scale(ln.lambda.eps) * sqrt(1 - pve.1)
 
-clean.mu <- exp(clean.ln.mu)
+clean.lambda <- exp(clean.ln.lambda)
 
 ######################
 ## sequencing depth ##
@@ -197,8 +209,8 @@ rr <- rgamma(ncell.ind * nn, shape=rho.a, scale=1/rho.b)
 
 cells <- 1:length(rr)
 
-.write(t(mu), file = gzfile(out %&% ".mu.gz"))
-.write(t(clean.mu), file = gzfile(out %&% ".mu-clean.gz"))
+.write(t(lambda), file = gzfile(out %&% ".lambda.gz"))
+.write(t(clean.lambda), file = gzfile(out %&% ".lambda-clean.gz"))
 .write(t(xx), file = gzfile(out %&% ".covar.gz"))
 .write(data.frame(ww), file = gzfile(out %&% ".label.gz"))
 .write(data.frame(cells), file = gzfile(out %&% ".cols.gz"))

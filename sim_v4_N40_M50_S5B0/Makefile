@@ -1,15 +1,15 @@
 IND := 40
 NGENE := 10000
 NCAUSAL := 100
-NCOVAR_S := 0
-NCOVAR_B := 5
+NCOVAR_S := 5
+NCOVAR_B := 0
 NCELL_IND := 50
 rhoA := 6.25 # Estimated from Microglia
 rhoB := 6.25 # mean = 1, var = 0.16
 
-RSEED := $(shell seq 1 10)
+RSEED := $(shell seq 1 20)
 
-all: $(foreach r, $(RSEED), $(foreach pa, 0, $(foreach p0, 5, $(foreach p1, 3 2 15 1 05, summary/$(p1)_$(p0)_$(pa)_$(r).eval.gz))))
+all: $(foreach r, $(RSEED), $(foreach pa, 5, $(foreach p0, 5, $(foreach p1, 3 2 1 0, $(foreach pf, 0 1, summary/$(p1)_$(p0)_$(pa)_$(pf)_$(r).eval.gz)))))
 
 ##############
 # evaluation #
@@ -18,7 +18,7 @@ all: $(foreach r, $(RSEED), $(foreach pa, 0, $(foreach p0, 5, $(foreach p1, 3 2 
 # % = $(pve_1)_$(pve_0)_$(pve_a)_$(rseed)
 summary/%.eval.gz: result/%.mu_cols.gz result/%.sum.gz result/%.mean.gz result/%.ln_resid_mu.gz data/%.causal.gz data/%.label.gz
 	@[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	@Rscript --vanilla ../R/evalute_v3.R $* $@
+	@Rscript --vanilla ../R/evalute_v4.R $* $@
 	@rm -f result/$**.*.gz
 	@rm -f data/$**.*.gz
 	@rm -f data/$**.*.gz.index
@@ -60,13 +60,13 @@ result/%.trt.gz: data/%.ind.gz data/%.label.gz
 # simulate matrix market data #
 ###############################
 
-data/%.mtx.gz: data/%.mu.gz
+data/%.mtx.gz: data/%.lambda.gz
 	@[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	@mmutil_simulate --mu $< --rho data/$*.rho.gz --col data/$*.cols.gz --out data/$*
 
-data/%.mu.gz:
+data/%.lambda.gz:
 	@[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	@Rscript --vanilla ../R/simulate_glm_v3.R $(IND) $(NGENE) $(NCAUSAL) $(NCOVAR_S) $(NCOVAR_B) $(NCELL_IND) $(shell echo $* | awk -F'_' '{ for(j=1; j<=(NF - 1); ++j) print " 0." $$j; print $$NF }') $(rhoA) $(rhoB) data/$*
+	@Rscript --vanilla ../R/simulate_glm_v4.R $(IND) $(NGENE) $(NCAUSAL) $(NCOVAR_S) $(NCOVAR_B) $(NCELL_IND) $(shell echo $* | awk -F'_' '{ for(j=1; j<=(NF - 1); ++j) print " 0." $$j; print $$NF }') $(rhoA) $(rhoB) data/$*
 
 data/%.cols.gz: data/%.mtx.gz
 	@touch $@
@@ -74,10 +74,10 @@ data/%.cols.gz: data/%.mtx.gz
 data/%.ind.gz: data/%.mtx.gz
 	@touch $@
 
-data/%.label.gz: data/%.mu.gz
+data/%.label.gz: data/%.lambda.gz
 	@touch $@
 
-data/%.causal.gz: data/%.mu.gz
+data/%.causal.gz: data/%.lambda.gz
 	@touch $@
 
 reset:
