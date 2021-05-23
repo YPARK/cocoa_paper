@@ -5,8 +5,10 @@ author: "Yongjin Park"
 
 ```{r include = FALSE}
 library(data.table)
-library(tidyverse)
 library(patchwork)
+library(tidyverse)
+setDTthreads(8)
+
 source("R/Util-rmd.R")
 
 fig.dir = 'Fig/Simulation/'
@@ -23,7 +25,7 @@ options(stringsAsFactors = FALSE)
     fread(cmd = .cmd %&% " " %&% x %&% "| sed 's/  / NA /g'", ...)
 }
 
-.read <- function(hdr) {
+.read.v3 <- function(hdr) {
 
     .files.1 <- list.files(hdr %&% "/result/",
                            pattern = "eval", full.names=TRUE)
@@ -33,7 +35,12 @@ options(stringsAsFactors = FALSE)
 
     .files <- c(.files.1, .files.2)
 
-    .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE)
+    .ct <- c("character","character","character","character",
+             "integer","double","double","double",
+             "double","double","double")
+
+    .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE,
+                   colClasses = .ct)
 
     .dat <- .dat %>% 
         do.call(what=rbind) %>%
@@ -79,7 +86,7 @@ options(stringsAsFactors = FALSE)
 ```
 
 ```{r read_simulation_v3_data}
-.read.named <- function(x) {
+.read.named.v3 <- function(x) {
     xx <-
         str_remove(x, "sim_v3_") %>%
         str_remove_all("[NMS]") %>% 
@@ -88,7 +95,7 @@ options(stringsAsFactors = FALSE)
         as.integer
 
     names(xx) <- c("N","M","S","B")
-    ret <- .read(x) %>% as.data.table
+    ret <- .read.v3(x) %>% as.data.table
     ret[, N := xx[1]]
     ret[, M := xx[2]]
     ret[, S := xx[3]]
@@ -98,26 +105,28 @@ options(stringsAsFactors = FALSE)
 
 .file <- ".simulation.v3.rdata"
 if(!file.exists(.file)) {
+
     result.dt <-
-        list.files(".", "sim_v3*") %>%
-        lapply(.read.named) %>% 
-        do.call(what=rbind)
+        list.files(".", "sim_v3") %>%
+        lapply(.read.named.v3) %>% 
+        do.call(what = rbind)
+
     save(list="result.dt", file=.file)
 } else {
     load(.file)
 }
 ```
 
-```{r}
+```{r plot_v3_data}
 col.lty.df <- 
     tibble(
-        method = c("cocoa", "cocoa.pc.safe", "cocoa.pc.full", "tot", "tot.pc.safe", "tot.pc.full", "avg", "cf"),
+        method = c("cocoa", "cocoa.pc.safe", "cocoa.pc.full", "tot", "tot.pc.safe", "tot.pc.full", "avg", "mu", "cf"),
         label = c("CoCoA", "CoCoA + safe PC", "CoCoA + 10 PC",
                   "Total", "Tot + safe PC", "Tot + 10 PC",
-                  "Average", "confounder"),
-        lty = c(1, 2, 3, 1, 2, 3, 1, 1),
-        pch = c(19, 21, 32, 17, 24, 32, 4, 3),
-        col = c("magenta", "magenta", "magenta", "#009900", "#009900", "#009900", "#00FF00", "#000099")
+                  "Average", "Bayesian", "confounder"),
+        lty = c(1, 2, 3, 1, 2, 3, 1, 1, 1),
+        pch = c(19, 21, 32, 17, 24, 32, 4, 5, 3),
+        col = c("magenta", "magenta", "magenta", "#009900", "#009900", "#009900", "#00FF00", "gray40", "#000099")
     )
 
 plot.v3 <- function(.sum) {
@@ -149,7 +158,6 @@ plot.v3 <- function(.sum) {
         mutate(.pa = "label V[W|X]=" %&% pa)
 
     .ggplot(.df, .aes) +
-        facet_wrap(.p0 ~ .pa, scales = "free") +
         geom_linerange(.aes, lty=1, size=.2) +
         geom_line() +
         geom_point(aes(shape=method), stroke=.3, size=1.5, fill="white") +
@@ -190,9 +198,9 @@ plot.v3 <- function(.sum) {
 ```
 
 ```{r fig.width=5, fig.height=6}
-for(ss in c(1, 2, 5)) {
+for(ss in c(2, 5)) {
 
-    .dt <- result.dt[S==ss & B == (5- ss) & N == 40 & M == 50]
+    .dt <- result.dt[S==ss & B == (5- ss) & N == 40 & M == 50 & p1 <= .3]
 
     p1 <- 
         plot.v3(.take.cor(.dt)) +
@@ -225,7 +233,7 @@ for(ss in c(1, 2, 5)) {
 ### 2. CoCoA would not over-correct the variance even if there was no confounding effect
 
 ```{r}
-.take.roc <- function(.dt, .method = c("cocoa", "tot", "avg", "cf")) {
+.take.roc <- function(.dt, .method = c("cocoa", "tot", "avg", "mu", "cf")) {
 
     .ret1 <- .dt[method %in% .method,
                 .(y = mean(auprc), y.se = 2 * sd(auprc)/sqrt(.N)),
@@ -243,7 +251,7 @@ for(ss in c(1, 2, 5)) {
 ```
 
 ```{r fig.width=5, fig.height=4}
-.dt <- result.dt[B==5 & N == 40 & M == 50] %>% .take.roc
+.dt <- result.dt[B==5 & N == 40 & p1 <= .3] %>% .take.roc
 
 p1 <-
     plot.v3(.dt[metric=="power10"]) +
@@ -264,8 +272,9 @@ cat("\n\n[PDF](" %&% .file %&% ")")
 ### 3. CoCoA improves statistical power
 
 ```{r fig.width=5, fig.height=4}
-for(ss in c(1, 2, 5)){
-    .dt <- result.dt[S==ss & N == 40 & M == 50] %>% .take.roc
+for(ss in c(2, 5)){
+
+    .dt <- result.dt[S==ss & N == 20 & M == 20] %>% .take.roc
 
     p1 <-
         plot.v3(.dt[metric=="power10"]) +
@@ -287,22 +296,24 @@ for(ss in c(1, 2, 5)){
 ### 4. Additional principal component analysis can help, but over-correction by matrix factorization can hurt
 
 ```{r}
-.take.power <- function(.dt, .method = c("cocoa.pc.safe","cocoa","tot", "tot.pc.safe","tot.pc.full", "cf")) {
+.take.auprc <- function(.dt, .method = c("cocoa.pc.safe","cocoa","tot", "tot.pc.safe","tot.pc.full", "cf")) {
     .sum <- .dt[method %in% .method,
-                .(y = mean(power10), y.se = 2 * sd(power10)/sqrt(.N)),
+                .(y = mean(auprc), y.se = 2 * sd(auprc)/sqrt(.N)),
                 by = .(p1, p0, pa, method)]
 }
 ```
 
 ```{r fig.width=5, fig.height=2.5}
-for(ss in c(0, 1, 2, 5)){
-    .dt <- result.dt[S == ss & B == (5-ss)] %>%  .take.power
+for(ss in c(0, 2, 5)){
+
+    .dt <- result.dt[S == ss & N == 20 & B == (5-ss)] %>%  .take.auprc
 
     plt <- plot.v3(.dt) +
         ggtitle("#confounder: " %&% ss %&% " #non-confounding covariate: " %&% (5 - ss)) +
-        ylab("Power (FDR < 10%)")
+        ylab("AUPRC")
 
     print(plt)
+
     .file <- fig.dir %&% "/Fig_Q4_S" %&% ss %&% ".pdf"
     .gg.save(.file, plot = plt, width=5, height=2.5)
     cat("\n\n[PDF](" %&% .file %&% ")\n\n")

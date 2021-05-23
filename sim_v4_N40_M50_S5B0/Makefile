@@ -9,7 +9,7 @@ rhoB := 6.25 # mean = 1, var = 0.16
 
 RSEED := $(shell seq 1 20)
 
-all: $(foreach r, $(RSEED), $(foreach pa, 5, $(foreach p0, 5, $(foreach p1, 3 2 1 0, $(foreach pf, 0 1, summary/$(p1)_$(p0)_$(pa)_$(pf)_$(r).eval.gz)))))
+all: $(foreach r, $(RSEED), $(foreach pa, 5, $(foreach p0, 5 0, $(foreach p1, 3 2 1 0, $(foreach pf, 0 1, summary/$(p1)_$(p0)_$(pa)_$(pf)_$(r).eval.gz)))))
 
 ##############
 # evaluation #

@@ -7,7 +7,7 @@ NCELL_IND := 50
 rhoA := 6.25 # Estimated from Microglia
 rhoB := 6.25 # mean = 1, var = 0.16
 
-RSEED := $(shell seq 1 10)
+RSEED := $(shell seq 10 30)
 PF := 0
 
 all: $(foreach r, $(RSEED), $(foreach pa, 5, $(foreach p0, 5 0, $(foreach p1, 3 2 1 0, summary/$(p1)_$(p0)_$(pa)_$(PF)_$(r).eval.gz))))
@@ -67,8 +67,15 @@ summary/%.eval.gz: $(foreach knn, $(KNN), $(foreach ext, $(EXT), $(knn)/%.$(ext)
 	@gzip -cd data/$*.ind.gz | awk 'BEGIN { j=0; while(("gzip -cd data/$*.label.gz " | getline line)) { v=sprintf("Ind%02d",(++j)); d[v]=line } } { print d[$$1] }' | gzip -c > 1/$*.trt.gz
 	@mmutil_cfa_col --mtx data/$*.mtx.gz --col data/$*.cols.gz --annot 1/$*.annot.gz --trt 1/$*.trt.gz --lab 1/$*.lab.gz --ind data/$*.ind.gz --verbose --knn 1 --rank 50 --nboot 0 --gamma_a0 1 --gamma_b0 1 --log_scale --out $(shell echo $@ | sed 's/.ln_resid_mu.gz//g')
 
-# % = $(knn)/$(data_flag)
-%.mu_cols.gz: %.ln_resid_mu.gz
+1/%.mu_cols.gz: 1/%.ln_resid_mu.gz
+	@touch $@
+10/%.mu_cols.gz: 10/%.ln_resid_mu.gz
+	@touch $@
+50/%.mu_cols.gz: 50/%.ln_resid_mu.gz
+	@touch $@
+100/%.mu_cols.gz: 100/%.ln_resid_mu.gz
+	@touch $@
+200/%.mu_cols.gz: 200/%.ln_resid_mu.gz
 	@touch $@
 
 ###############################
@@ -96,4 +103,4 @@ data/%.causal.gz: data/%.lambda.gz
 	@touch $@
 
 reset:
-	@rm -rf data result
+	@rm -rf data 1 10 50 100 200

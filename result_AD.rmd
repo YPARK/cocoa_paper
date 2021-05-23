@@ -506,7 +506,7 @@ n.fwer01.celltype.genes <- stat.dt[pheno == "pathoAD" & fwer.cocoa < .01,
     paste(collapse =", ")
 ```
 
-* DEGs with FDR controlled at 1%: `r num.int(n.fdr01.genes)` genes (`r num.round(100 * n.fdr01.genes / n.tot.genes)`%) consist of `r paste(n.fdr01.celltype.genes, collapse=", ")` across 
+* DEGs with FDR controlled at 1%: `r num.int(n.fdr01.genes)` genes (`r num.round(100 * n.fdr01.genes / n.tot.genes)`%) consist of `r paste(n.fdr01.celltype.genes, collapse=", ")`
 
 * DEGs with FWER controlled at 1%: `r num.int(n.fwer01.genes)` genes (`r num.round(100 * n.fwer01.genes / n.tot.genes)`%) consist of `r paste(n.fwer01.celltype.genes, collapse=", ")`
 
@@ -881,6 +881,17 @@ show.gene.plot <- function(g, .pheno, .lab, .ct = NULL) {
 
 .genes <- data.dt[pheno == .pheno, .(gene)] %>% unlist
 
+.temp <-
+    stat.dt[pheno == .pheno &
+            fdr.cocoa < .01 &
+            lfsr < .01,
+            .(gene, celltype)] %>%
+    unique
+
+n.g.ct <- .temp %>% nrow
+n.g <- .temp[, .(gene)] %>% unique %>% nrow
+n.g.ct.stat <- .temp[, .(n = .N), by = .(celltype)]
+
 .gene.ct <-
     stat.dt[pheno == .pheno &
             (gene %in% .genes) &
@@ -910,7 +921,11 @@ show.gene.plot <- function(g, .pheno, .lab, .ct = NULL) {
 .files <- sapply(1:nrow(.gene.ct), .save.example)
 ```
 
-#### A genomic view combining all the cell types
+### Controlling Wilcoxon FDR 1% and local FSR 1%, we identified `r num.int(n.g.ct)` gene and cell type pairs, `r num.int(n.g)` AD genes.
+
+* Average: `r num.round(mean(n.g.ct.stat$n))` $\pm$ `r num.round(sd(n.g.ct.stat$n))`
+
+#### A genomic view combining all the cell types, highlighting `r nrow(.gene.ct)` gene-cell-type pairs and `r length(unique(.gene.ct$gene))` genes (at most top 20 genes per cell type).
 
 ```{r}
 .onto <- read.ontology()

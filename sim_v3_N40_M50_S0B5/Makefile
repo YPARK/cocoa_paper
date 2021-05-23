@@ -7,7 +7,7 @@ NCELL_IND := 50
 rhoA := 6.25 # Estimated from Microglia
 rhoB := 6.25 # mean = 1, var = 0.16
 
-RSEED := $(shell seq 1 10)
+RSEED := $(shell seq 1 20)
 
 all: $(foreach r, $(RSEED), $(foreach pa, 0, $(foreach p0, 5, $(foreach p1, 3 2 15 1 05, summary/$(p1)_$(p0)_$(pa)_$(r).eval.gz))))
 

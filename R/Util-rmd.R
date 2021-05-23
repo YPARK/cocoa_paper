@@ -1,7 +1,6 @@
 options(stringsAsFactors = FALSE)
 library(data.table)
 library(tidyverse)
-library(ggrepel)
 
 `%&%` <- function(a, b) paste0(a, b)
 
@@ -74,11 +73,6 @@ log.msg <- function(...) {
 }
 
 .remove <- function(...) gsub(..., replacement = '')
-
-require(grid)
-require(gridExtra)
-require(gtable)
-require(ggplot2)
 
 match.widths.grob <- function(g.list) {
 
