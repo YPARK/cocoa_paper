@@ -7,12 +7,8 @@ author: "Yongjin Park"
 library(data.table)
 library(patchwork)
 library(tidyverse)
-setDTthreads(8)
-
 source("R/Util-rmd.R")
-
 fig.dir = 'Fig/Simulation/'
-
 dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
 knitr::opts_chunk$set(fig.path = fig.dir, results = "asis")
 knitr::opts_chunk$set(dev.args = list(bg = "transparent"), echo = FALSE)
@@ -25,19 +21,16 @@ options(stringsAsFactors = FALSE)
     fread(cmd = .cmd %&% " " %&% x %&% "| sed 's/  / NA /g'", ...)
 }
 
-.read.v3 <- function(hdr) {
+.read.v4 <- function(hdr) {
+    .files <- list.files(hdr %&% "/summary/",
+                         pattern = "eval.gz", full.names=TRUE)
 
-    .files.1 <- list.files(hdr %&% "/result/",
-                           pattern = "eval", full.names=TRUE)
-
-    .files.2 <- list.files(hdr %&% "/summary/",
-                           pattern = "eval.gz", full.names=TRUE)
-
-    .files <- c(.files.1, .files.2)
-
-    .ct <- c("character","character","character","character",
-             "integer","double","double","double",
-             "double","double","double")
+    .ct <- c("character","character","character",
+             "character","character", "integer",
+             "double","double","double",
+             "double","double","double",
+             "double","double","double",
+             "double","double")
 
     .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE,
                    colClasses = .ct)
@@ -46,6 +39,7 @@ options(stringsAsFactors = FALSE)
         do.call(what=rbind) %>%
         mutate(p1 = as.numeric("0." %&% p1)) %>% 
         mutate(pa = as.numeric("0." %&% pa)) %>% 
+        mutate(pf = as.numeric("0." %&% pf)) %>% 
         mutate(p0 = as.numeric("0." %&% p0))
 }
 
@@ -85,6 +79,144 @@ options(stringsAsFactors = FALSE)
 }
 ```
 
+## New results
+
+```{r read_simulation_v4_data}
+.read.named.v4 <- function(x) {
+    xx <-
+        str_remove(x, "sim_v4_") %>%
+        str_remove_all("[NMS]") %>% 
+        str_split("[_B]") %>%
+        unlist %>%
+        as.integer
+
+    names(xx) <- c("N","M","S","B")
+    ret <- .read.v4(x) %>% as.data.table
+    ret[, N := xx[1]]
+    ret[, M := xx[2]]
+    ret[, S := xx[3]]
+    ret[, B := xx[4]]
+    return(ret)
+}
+
+.file <- ".simulation.v4.rdata"
+if(!file.exists(.file)) {
+
+    result.dt <-
+        list.files(".", "sim_v4") %>%
+        lapply(FUN=.read.named.v4) %>%
+        do.call(what=rbind)
+
+    save(list="result.dt", file=.file)
+} else {
+    load(.file)
+}
+```
+
+
+```{r plot_v4_data}
+plot.v4 <- function(.sum) {
+
+    col.lty.df <- 
+        tibble(
+            method = c("cocoa", "tot", "avg", "MAST", "cf"),
+            label = c("CoCoA", "Total", "Average", "MAST", "confounder"),
+            lty = c(1, 1, 2, 1, 2),
+            pch = c(19, 17, 24, 5, 3),
+            col = c("magenta", "#009900", "#00FF00", "gray40", "#000099")
+        )
+    
+    .max.dt <- .sum[, .(y.max = max(y)), by = .(method)]
+    .method <- .max.dt[order(.max.dt$y.max, decreasing=TRUE),
+                       .(method)] %>%
+        unlist
+
+    .temp <-
+        tibble(method = .method) %>% 
+        left_join(col.lty.df, by = "method") %>%
+        na.omit
+
+    .sum <- .sum %>%
+        mutate(method = factor(method, .temp$method, .temp$label))
+
+    .lty <- .temp$lty
+    .cols <- .temp$col
+    .pch <- .temp$pch
+
+    .aes <- aes(x = p1, y = y,
+                ymin = y - y.se,
+                ymax = y + y.se,
+                colour = method,
+                lty = method)
+
+    .df <- .sum %>%
+        as_tibble %>% 
+        mutate(.p0 = "expr. V[Y|X]=" %&% p0) %>%
+        mutate(.pa = "label V[W|X]=" %&% pa)
+
+    .ggplot(.df, .aes) +
+        geom_linerange(.aes, lty=1, size=.2) +
+        geom_line() +
+        geom_point(aes(shape=method), stroke=.3, size=1.5, fill="white") +
+        scale_shape_manual(values = .pch) +
+        scale_colour_manual(values = .cols) +
+        scale_linetype_manual(values = .lty)
+}
+```
+
+
+```{r}
+
+.dt <-
+    result.dt[p1 == .3 & pf == 0 & B == 0,
+              .(y = mean(auprc), y.se = sd(auprc)/sqrt(.N)),
+              by = .(p0, M, N, method)]
+
+ggplot(.dt, aes(x = N, y = y, colour=method)) +
+    facet_grid(M ~ p0) +
+    geom_linerange(aes(ymin = y - y.se, ymax = y + y.se)) +
+    geom_line() +
+    geom_point() +
+    ylab("AUPRC")
+
+```
+
+
+
+```{r}
+
+.take.roc <- function(.dt, .method = c("cocoa", "tot", "avg", "mu", "MAST", "cf")) {
+    .dt[method %in% .method,
+        .(y = mean(auprc), y.se = 2 * sd(auprc)/sqrt(.N)),
+        by = .(p1, p0, pa, method)]
+}
+
+.dt <- result.dt[pf == 0 & N == 40 & M == 20 & p0 == 0] %>% .take.roc
+
+
+
+
+
+
+.ggplot(.dt, aes(x=p1, y=y, colour=method)) +
+    geom_point() +
+    geom_line()
+
+## TODO: as a function # cells or # individuals
+
+## plot.v4(
+
+```
+
+
+
+
+
+
+
+## Previous results
+
+
 ```{r read_simulation_v3_data}
 .read.named.v3 <- function(x) {
     xx <-
@@ -120,7 +252,8 @@ if(!file.exists(.file)) {
 ```{r plot_v3_data}
 col.lty.df <- 
     tibble(
-        method = c("cocoa", "cocoa.pc.safe", "cocoa.pc.full", "tot", "tot.pc.safe", "tot.pc.full", "avg", "mu", "cf"),
+        method = c("cocoa", "cocoa.pc.safe", "cocoa.pc.full",
+                   "tot", "tot.pc.safe", "tot.pc.full", "avg", "mu", "cf"),
         label = c("CoCoA", "CoCoA + safe PC", "CoCoA + 10 PC",
                   "Total", "Tot + safe PC", "Tot + 10 PC",
                   "Average", "Bayesian", "confounder"),
