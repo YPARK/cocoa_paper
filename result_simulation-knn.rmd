@@ -1,0 +1,147 @@
+---
+title: "Simulation results for testing kNN sensitivity"
+author: "Yongjin Park"
+---
+
+```{r include = FALSE}
+library(data.table)
+library(tidyverse)
+
+source("R/Util-rmd.R")
+
+fig.dir = 'Fig/Simulation/knn/'
+
+dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
+knitr::opts_chunk$set(fig.path = fig.dir, results = "asis")
+knitr::opts_chunk$set(dev.args = list(bg = "transparent"), echo = FALSE)
+options(stringsAsFactors = FALSE)
+```
+
+```{r include = FALSE}
+.fread <- function(x, ...) {
+    .cmd <- ifelse(str_ends(x, "gz"), "gzip -cd ", "cat")
+    fread(cmd = .cmd %&% " " %&% x %&% "| sed 's/  / NA /g'", ...)
+}
+
+.read.v5 <- function(hdr) {
+
+    .files <- list.files(hdr %&% "/summary/",
+                           pattern = "eval.gz", full.names=TRUE)
+
+    .ct <- c("character","character","character",
+             "character","character", "integer",
+             "double","double","double",
+             "double","double","double",
+             "double","double","double",
+             "double","double")
+
+    .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE,
+                   colClasses = .ct)
+
+    .dat <- .dat %>% 
+        do.call(what=rbind) %>%
+        mutate(p1 = as.numeric("0." %&% p1)) %>% 
+        mutate(pa = as.numeric("0." %&% pa)) %>% 
+        mutate(pf = as.numeric("0." %&% pf)) %>% 
+        mutate(p0 = as.numeric("0." %&% p0))
+}
+
+.rename <- function(.sum) {
+
+    .method <- c("opt","cocoa","marg","mu","avg","tot")
+    .lab <- c("optimal", "CoCoA", "marginal","mu", "average", "total")
+    .sum[, method := factor(method, .method, .lab)]
+
+    .pa <- sort(unique(.sum$pa))
+    .pa.lab <- "X to W (" %&% round(.pa * 100) %&% "%)"
+    .sum[, pa := factor(pa, .pa, .pa.lab)]
+
+    return(.sum)
+}
+
+.ggplot <- function(...) {
+    ggplot(...) +
+        theme_bw() +
+        ggplot2::theme(plot.background = element_blank(),
+                       plot.margin = unit(c(0,.5,0,.5), 'lines'),
+                       strip.background = element_blank(),
+                       strip.text = element_text(size=6),
+                       legend.background = element_blank(),
+                       legend.text = element_text(size = 8),
+                       legend.title = element_text(size = 8),
+                       axis.title = element_text(size = 8),
+                       legend.key.width = unit(1, 'lines'),
+                       legend.key.height = unit(.2, 'lines'),
+                       legend.key.size = unit(1, 'lines'),
+                       axis.line = element_line(color = 'gray20', size = .5),
+                       axis.text = element_text(size = 6))
+}
+```
+
+
+```{r read_simulation_v3_data}
+.read.named.v5 <- function(x) {
+    xx <-
+        str_remove(x, "sim_v5_") %>%
+        str_remove_all("[NMS]") %>% 
+        str_split("[_B]") %>%
+        unlist %>%
+        as.integer
+
+    names(xx) <- c("N","M","S","B")
+    ret <- .read.v5(x) %>% as.data.table
+    ret[, N := xx[1]]
+    ret[, M := xx[2]]
+    ret[, S := xx[3]]
+    ret[, B := xx[4]]
+    return(ret)
+}
+
+.file <- ".simulation.v5.rdata"
+if(!file.exists(.file)) {
+    result.dt <- .read.named.v5("sim_v5_N40_M50_S5B0")
+    save(list="result.dt", file=.file)
+} else {
+    load(.file)
+}
+```
+
+
+```{r}
+
+.dt <- result.dt[,
+                 .(y = mean(efdr01), y.sd = sd(efdr01)),
+                 by = .(p1, knn, pa, p0)]
+
+.aes <- aes(x=p1, y=y,
+            ymin = pmax(y - y.sd, 0),
+            ymax = pmin(y + y.sd, 1),
+            colour = factor(knn, c(1,10,50,100,200)))
+
+.ggplot(.dt, .aes) +
+    facet_grid(.~p0) +
+    geom_line() +
+    geom_linerange() +
+    geom_point()
+
+```
+
+```{r}
+
+.dt <- result.dt[,
+                 .(y = mean(auprc), y.sd = sd(auprc)),
+                 by = .(p1, knn, pa, p0)]
+
+.aes <- aes(x=p1, y=y,
+            ymin = pmax(y - y.sd, 0),
+            ymax = pmin(y + y.sd, 1),
+            colour = factor(knn, c(1,10,50,100,200)))
+
+.ggplot(.dt, .aes) +
+    facet_grid(.~p0) +
+    geom_line() +
+    geom_linerange() +
+    geom_point()
+
+```
+

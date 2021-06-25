@@ -21,41 +21,6 @@ options(stringsAsFactors = FALSE)
     fread(cmd = .cmd %&% " " %&% x %&% "| sed 's/  / NA /g'", ...)
 }
 
-.read.v4 <- function(hdr) {
-    .files <- list.files(hdr %&% "/summary/",
-                         pattern = "eval.gz", full.names=TRUE)
-
-    .ct <- c("character","character","character",
-             "character","character", "integer",
-             "double","double","double",
-             "double","double","double",
-             "double","double","double",
-             "double","double")
-
-    .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE,
-                   colClasses = .ct)
-
-    .dat <- .dat %>% 
-        do.call(what=rbind) %>%
-        mutate(p1 = as.numeric("0." %&% p1)) %>% 
-        mutate(pa = as.numeric("0." %&% pa)) %>% 
-        mutate(pf = as.numeric("0." %&% pf)) %>% 
-        mutate(p0 = as.numeric("0." %&% p0))
-}
-
-.rename <- function(.sum) {
-
-    .method <- c("opt","cocoa","marg","mu","avg","tot")
-    .lab <- c("optimal", "CoCoA", "marginal","mu", "average", "total")
-    .sum[, method := factor(method, .method, .lab)]
-
-    .pa <- sort(unique(.sum$pa))
-    .pa.lab <- "X to W (" %&% round(.pa * 100) %&% "%)"
-    .sum[, pa := factor(pa, .pa, .pa.lab)]
-
-    return(.sum)
-}
-
 .ggplot <- function(...) {
     .scale.x <-
         scale_x_continuous("% variance explained by phenotype (W)",
@@ -79,9 +44,31 @@ options(stringsAsFactors = FALSE)
 }
 ```
 
-## New results
+## New results including `MAST`
 
 ```{r read_simulation_v4_data}
+.read.v4 <- function(hdr) {
+    .files <- list.files(hdr %&% "/summary/",
+                         pattern = "eval.gz", full.names=TRUE)
+
+    .ct <- c("character","character","character",
+             "character","character", "integer",
+             "double","double","double",
+             "double","double","double",
+             "double","double","double",
+             "double","double")
+
+    .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE,
+                   colClasses = .ct)
+
+    .dat <- .dat %>% 
+        do.call(what=rbind) %>%
+        mutate(p1 = as.numeric("0." %&% p1)) %>% 
+        mutate(pa = as.numeric("0." %&% pa)) %>% 
+        mutate(pf = as.numeric("0." %&% pf)) %>% 
+        mutate(p0 = as.numeric("0." %&% p0))
+}
+
 .read.named.v4 <- function(x) {
     xx <-
         str_remove(x, "sim_v4_") %>%
@@ -98,21 +85,7 @@ options(stringsAsFactors = FALSE)
     ret[, B := xx[4]]
     return(ret)
 }
-
-.file <- ".simulation.v4.rdata"
-if(!file.exists(.file)) {
-
-    result.dt <-
-        list.files(".", "sim_v4") %>%
-        lapply(FUN=.read.named.v4) %>%
-        do.call(what=rbind)
-
-    save(list="result.dt", file=.file)
-} else {
-    load(.file)
-}
 ```
-
 
 ```{r plot_v4_data}
 plot.v4 <- function(.sum) {
@@ -166,18 +139,97 @@ plot.v4 <- function(.sum) {
 
 
 ```{r}
+.file <- ".simulation.v4.rdata"
+if(!file.exists(.file)) {
+
+    result.dt <-
+        list.files(".", "sim_v4") %>%
+        lapply(FUN=.read.named.v4) %>%
+        do.call(what=rbind)
+
+    save(list="result.dt", file=.file)
+} else {
+    load(.file)
+}
+```
+
+## 1. Sample size
+
+```{r}
+.p1 <- .2
+.p0 <- .5
 
 .dt <-
-    result.dt[p1 == .3 & pf == 0 & B == 0,
+    result.dt[p1 == .p1 & pf == .0 & p0 == .p0,
               .(y = mean(auprc), y.se = sd(auprc)/sqrt(.N)),
-              by = .(p0, M, N, method)]
+              by = .(S, M, N, method)]
 
 ggplot(.dt, aes(x = N, y = y, colour=method)) +
-    facet_grid(M ~ p0) +
+    facet_grid(S ~ M) +
     geom_linerange(aes(ymin = y - y.se, ymax = y + y.se)) +
     geom_line() +
     geom_point() +
     ylab("AUPRC")
+
+```
+
+
+## 2. Controlling false discovery rate
+
+```{r}
+
+function(nn) {
+
+    .dt <-
+        result.dt %>%
+        filter(p1 == 0, B == 0, pf == 0, N == nn) %>%
+        mutate(y = edr01) %>% 
+        as.data.table
+
+    ggplot(.dt, aes(x = method, y = y)) +
+        theme_bw() +
+        facet_grid(M ~ p0, scales="free", space="free") +
+        geom_boxplot(outlier.size=0, outlier.stroke=0) +
+    geom_point(aes(colour=method), size=.5, stroke=0,
+               position = position_jitter(w = 0.1, h = 0))
+}
+
+
+function(nn, .p0 = .5){
+
+.dt <-
+    result.dt %>%
+    filter(p0 == .p0, B == 0, pf == 0, N == nn) %>%
+    filter(p1 > 0) %>% 
+    mutate(y = efdr01) %>% 
+    as.data.table
+
+ggplot(.dt, aes(x = method, y = y)) +
+    xlab("method") + ylab("empirical FDR when controlled at 1%") +
+    theme_bw() +
+    facet_grid(M ~ p1, scales="free", space="free") +
+    geom_boxplot(outlier.size=0, outlier.stroke=0, width = .5, size = .2) +
+    geom_point(aes(colour=method), size=1, stroke=0,
+               position = position_jitter(w = 0.1, h = 0))
+
+}
+
+function(.p1, nn){
+
+.dt <-
+    result.dt %>%
+    filter(p1 == .p1, B == 0, pf == .1, N == nn) %>%
+    mutate(y = efdr01) %>% 
+    as.data.table
+
+ggplot(.dt, aes(x = method, y = y)) +
+    theme_bw() +
+    facet_grid(M ~ p0, scales="free", space="free") +
+    geom_boxplot(outlier.size=0, outlier.stroke=0) +
+    geom_point(aes(colour=method), size=.5, stroke=0,
+               position = position_jitter(w = 0.1, h = 0))
+
+}
 
 ```
 
@@ -216,8 +268,21 @@ ggplot(.dt, aes(x = N, y = y, colour=method)) +
 
 ## Previous results
 
-
 ```{r read_simulation_v3_data}
+.read.v3 <- function(hdr) {
+    .files.1 <- list.files(hdr %&% "/result/",
+                           pattern = "eval", full.names=TRUE)
+    .files.2 <- list.files(hdr %&% "/summary/",
+                           pattern = "eval.gz", full.names=TRUE)
+    .files <- c(.files.1, .files.2)
+    .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE)
+    .dat <- .dat %>% 
+        do.call(what=rbind) %>%
+        mutate(p1 = as.numeric("0." %&% p1)) %>% 
+        mutate(pa = as.numeric("0." %&% pa)) %>% 
+        mutate(p0 = as.numeric("0." %&% p0))
+}
+
 .read.named.v3 <- function(x) {
     xx <-
         str_remove(x, "sim_v3_") %>%
@@ -237,7 +302,6 @@ ggplot(.dt, aes(x = N, y = y, colour=method)) +
 
 .file <- ".simulation.v3.rdata"
 if(!file.exists(.file)) {
-
     result.dt <-
         list.files(".", "sim_v3") %>%
         lapply(.read.named.v3) %>% 
