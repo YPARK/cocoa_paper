@@ -37,7 +37,7 @@ log.msg <- function(...) {
 ################################################################
 .mkdir <- function(...) dir.create(..., recursive=TRUE, showWarnings=FALSE)
 
-.gg.save <- function(filename, ...) {
+.gg.save <- function(filename, ..., cat.link = TRUE) {
     .mkdir(dirname(filename))
     if(file.exists(filename)) {
         log.msg('File already exits: %s', filename)
@@ -47,6 +47,9 @@ log.msg <- function(...) {
                         units = 'in',
                         dpi = 300,
                         useDingbats = FALSE)
+    }
+    if(cat.link) {
+        cat("\n[PDF](",filename,")\n\n",sep="")
     }
 }
 
