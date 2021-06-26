@@ -1,0 +1,156 @@
+---
+title: "Simulation results for the causal discovery of DEGs"
+author: "Yongjin Park"
+---
+
+```{r include = FALSE}
+library(data.table)
+library(patchwork)
+library(tidyverse)
+source("R/Util-rmd.R")
+fig.dir = 'Fig/Simulation/size/'
+dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
+knitr::opts_chunk$set(fig.path = fig.dir, results = "asis", message = FALSE)
+knitr::opts_chunk$set(dev.args = list(bg = "transparent"))
+options(stringsAsFactors = FALSE)
+```
+
+```{r helper_functions}
+.fread <- function(x, ...) {
+    .cmd <- ifelse(str_ends(x, "gz"), "gzip -cd ", "cat")
+    fread(cmd = .cmd %&% " " %&% x %&% "| sed 's/  / NA /g'", ...)
+}
+
+.ggplot <- function(...) {
+
+    ggplot(...) +
+        theme_bw() +
+        ggplot2::theme(plot.background = element_blank(),
+                       plot.margin = unit(c(0,.5,0,.5), 'lines'),
+                       strip.background = element_blank(),
+                       strip.text = element_text(size=6),
+                       legend.background = element_blank(),
+                       legend.text = element_text(size = 8),
+                       legend.title = element_text(size = 8),
+                       axis.title = element_text(size = 8),
+                       legend.key.width = unit(1, 'lines'),
+                       legend.key.height = unit(.2, 'lines'),
+                       legend.key.size = unit(1, 'lines'),
+                       axis.line = element_line(color = 'gray20', size = .5),
+                       axis.text = element_text(size = 6))
+}
+```
+
+```{r read_simulation_v4_data}
+.read.v4 <- function(hdr) {
+    .files <- list.files(hdr %&% "/summary/",
+                         pattern = "eval.gz", full.names=TRUE)
+
+    .ct <- c("character","character","character",
+             "character","character", "integer",
+             "double","double","double",
+             "double","double","double",
+             "double","double","double",
+             "double","double")
+
+    .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE,
+                   colClasses = .ct)
+
+    .dat <- .dat %>%
+        do.call(what=rbind) %>%
+        mutate(p1 = as.numeric("0." %&% p1)) %>%
+        mutate(pa = as.numeric("0." %&% pa)) %>%
+        mutate(pf = as.numeric("0." %&% pf)) %>%
+        mutate(p0 = as.numeric("0." %&% p0))
+}
+
+.read.named.v4 <- function(x) {
+    xx <-
+        str_remove(x, "sim_v4_") %>%
+        str_remove_all("[NMS]") %>%
+        str_split("[_B]") %>%
+        unlist %>%
+        as.integer
+
+    names(xx) <- c("N","M","S","B")
+    ret <- .read.v4(x) %>% as.data.table
+    ret[, N := xx[1]]
+    ret[, M := xx[2]]
+    ret[, S := xx[3]]
+    ret[, B := xx[4]]
+    return(ret)
+}
+```
+
+
+```{r read_sim4_data}
+.file <- ".simulation.v4.rdata"
+if(!file.exists(.file)) {
+
+    result.dt <-
+        list.files(".", "sim_v4") %>%
+        lapply(FUN=.read.named.v4) %>%
+        do.call(what=rbind)
+
+    save(list="result.dt", file=.file)
+} else {
+    load(.file)
+}
+result.dt[, p1.lab := "Variance Caused by Disease: " %&% (p1*100) %&% "%"]
+result.dt[, nind := as.factor(N)]
+result.dt[, ncell.per.ind := factor(M, c(50, 20), c(50, 20) %&% " cells per individual")]
+
+.method <- c("cocoa", "mu", "avg", "tot", "MAST", "cf")
+.method.lab <- c("CoCoA", "Bayesian", "Mean", "Total", "MAST", "Confounder")
+
+result.dt[, method := factor(method, .method, .method.lab)]
+```
+
+# 1. Sample size
+
+```{r}
+plot.sample.size <- function(.dt) {
+
+  .ggplot(.dt, aes(x = nind, y = auprc, fill=method)) +
+    facet_grid(ncell.per.ind ~ p1.lab) +
+    geom_boxplot(size=.3, outlier.size=0, outlier.stroke=0) +
+    scale_fill_brewer("", palette = "Paired") +
+    theme(legend.position = c(0, 1), legend.justification = c(0, 1)) +
+    ylab("AUPRC") + xlab("Number of individuals")
+
+}
+
+#' Unconfounded simulation
+plot.conf <- function(){
+  .p0 <- .5
+  .pf <- .0
+  .dt <- result.dt[p1 > 0 & pf == .pf & p0 == .p0 & S == 5]
+  return(plot.sample.size(.dt))
+}
+
+#' Violating ignorability assumption
+plot.violating <- function(){
+  .p0 <- .5
+  .pf <- .1
+  .dt <- result.dt[p1 > 0 & pf == .pf & p0 == .p0 & S == 5]
+  return(plot.sample.size(.dt))
+}
+```
+
+## When the disease label and other covariates are confounded and the conditional ignorability holds
+
+```{r Fig_Size_Conf, fig.width=6, fig.height=4}
+plt <- plot.conf()
+print(plt)
+.file <- fig.dir %&% "/Fig_Size_Conf.pdf"
+.gg.save(.file, plot=plt, width=6, height=4)
+```
+
+## When the disease label and other covariates are confounded and the ignorability assumption breaks down
+
+```{r Fig_Size_Viol, fig.width=6, fig.height=4}
+plt <- plot.violating()
+print(plt)
+.file <- fig.dir %&% "/Fig_Size_Viol.pdf"
+.gg.save(.file, plot=plt, width=6, height=4)
+```
