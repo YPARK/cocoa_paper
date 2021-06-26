@@ -1,0 +1,169 @@
+---
+title: "Simulation results for the causal discovery of DEGs"
+author: "Yongjin Park"
+---
+
+```{r include = FALSE}
+library(data.table)
+library(patchwork)
+library(tidyverse)
+source("R/Util-rmd.R")
+fig.dir = 'Fig/Simulation/power/'
+dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
+knitr::opts_chunk$set(fig.path = fig.dir, results = "asis", message = FALSE)
+knitr::opts_chunk$set(dev.args = list(bg = "transparent"))
+options(stringsAsFactors = FALSE)
+```
+
+```{r helper_functions}
+.fread <- function(x, ...) {
+    .cmd <- ifelse(str_ends(x, "gz"), "gzip -cd ", "cat")
+    fread(cmd = .cmd %&% " " %&% x %&% "| sed 's/  / NA /g'", ...)
+}
+
+.ggplot <- function(...) {
+
+    ggplot(...) +
+        theme_bw() +
+        ggplot2::theme(plot.background = element_blank(),
+                       plot.margin = unit(c(0,.5,0,.5), 'lines'),
+                       strip.background = element_blank(),
+                       strip.text = element_text(size=6),
+                       legend.background = element_blank(),
+                       legend.text = element_text(size = 8),
+                       legend.title = element_text(size = 8),
+                       axis.title = element_text(size = 8),
+                       legend.key.width = unit(1, 'lines'),
+                       legend.key.height = unit(.2, 'lines'),
+                       legend.key.size = unit(1, 'lines'),
+                       axis.line = element_line(color = 'gray20', size = .5),
+                       axis.text = element_text(size = 6))
+}
+```
+
+```{r read_simulation_v4_data}
+.read.v4 <- function(hdr) {
+    .files <- list.files(hdr %&% "/summary/",
+                         pattern = "eval.gz", full.names=TRUE)
+
+    .ct <- c("character","character","character",
+             "character","character", "integer",
+             "double","double","double",
+             "double","double","double",
+             "double","double","double",
+             "double","double")
+
+    .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE,
+                   colClasses = .ct)
+
+    .dat <- .dat %>%
+        do.call(what=rbind) %>%
+        mutate(p1 = as.numeric("0." %&% p1)) %>%
+        mutate(pa = as.numeric("0." %&% pa)) %>%
+        mutate(pf = as.numeric("0." %&% pf)) %>%
+        mutate(p0 = as.numeric("0." %&% p0))
+}
+
+.read.named.v4 <- function(x) {
+    xx <-
+        str_remove(x, "sim_v4_") %>%
+        str_remove_all("[NMS]") %>%
+        str_split("[_B]") %>%
+        unlist %>%
+        as.integer
+
+    names(xx) <- c("N","M","S","B")
+    ret <- .read.v4(x) %>% as.data.table
+    ret[, N := xx[1]]
+    ret[, M := xx[2]]
+    ret[, S := xx[3]]
+    ret[, B := xx[4]]
+    return(ret)
+}
+```
+
+
+```{r read_sim4_data}
+.file <- ".simulation.v4.rdata"
+if(!file.exists(.file)) {
+
+    result.dt <-
+        list.files(".", "sim_v4") %>%
+        lapply(FUN=.read.named.v4) %>%
+        do.call(what=rbind)
+
+    save(list="result.dt", file=.file)
+} else {
+    load(.file)
+}
+
+result.dt[, ncell.per.ind := factor(M, c(50, 20), c(50, 20) %&% " cells per individual")]
+
+.method <- c("cocoa", "mu", "avg", "tot", "MAST", "cf")
+.method.lab <- c("CoCoA", "Bayesian", "Mean", "Total", "MAST", "Confounder")
+
+result.dt[, method := factor(method, .method, .method.lab)]
+result.dt[, ind.lab := paste(N, " individuals")]
+result.dt[, p0.lab := paste("Var. by Confounder", p0*100, "%")]
+result.dt[, ncell.per.ind := factor(M, c(50, 20), c(50, 20) %&% " cells per individual")]
+```
+
+# Area Under Precision Recall
+
+```{r}
+plot.auprc <- function(.p0 = .5, .pf = 0) {
+
+  .title <- "Variation by Confounding Effect = " %&% (100 * .p0) %&% "%"
+
+  .dt <- result.dt[p0 == .p0 & pf == .pf]
+
+  .aes <- aes(x = as.factor(p1 * 100), y = auprc, fill = method)
+
+  .ggplot(.dt, .aes) +
+    ggtitle(.title) +
+    ylab("AUPRC") +
+    xlab("Variation by Disease Effect (%)") +
+    facet_grid(ncell.per.ind~ind.lab, scales="free") +
+    scale_fill_brewer(palette="Paired") +
+    theme(legend.title = element_blank()) +
+    theme(legend.position = c(0, 1), legend.justification = c(0, 1)) +
+    theme(axis.text.x = element_text(angle=90, vjust=0, hjust=1)) +
+    geom_boxplot(outlier.size=0, outlier.stroke=0, size=.2)
+}
+```
+
+### When there were no effects that may confound gene expressions with disease labels
+
+```{r fig.width = 8, fig.height = 5}
+plt <- plot.auprc(.p0 = 0, .pf = 0)
+print(plt)
+.file <- fig.dir %&% "/Fig_AUPRC_Conf0.pdf"
+.gg.save(.file, plt, width = 8, height = 5)
+```
+
+### When there were effects confounding expressions with disease labels
+
+```{r fig.width = 8, fig.height = 5}
+plt <- plot.auprc(.p0 = .5, .pf = 0)
+print(plt)
+.file <- fig.dir %&% "/Fig_AUPRC_Conf50.pdf"
+.gg.save(.file, plt, width = 8, height = 5)
+```
+
+### When the sequential ignorability assumption breaks down, but there were no confounder
+
+```{r fig.width = 8, fig.height = 5}
+plt <- plot.auprc(.p0 = 0, .pf = .1)
+print(plt)
+.file <- fig.dir %&% "/Fig_AUPRC_Conf0_Violating.pdf"
+.gg.save(.file, plt, width = 8, height = 5)
+```
+
+### When the sequential ignorability assumption breaks down and there were strong confounding effects
+
+```{r fig.width = 8, fig.height = 5}
+plt <- plot.auprc(.p0 = .5, .pf = .1)
+print(plt)
+.file <- fig.dir %&% "/Fig_AUPRC_Conf50_Violating.pdf"
+.gg.save(.file, plt, width = 8, height = 5)
+```

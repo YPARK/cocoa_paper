@@ -13,7 +13,7 @@ fig.dir = 'Fig/Simulation/knn/'
 
 dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
 knitr::opts_chunk$set(fig.path = fig.dir, results = "asis", message= FALSE)
-knitr::opts_chunk$set(dev.args = list(bg = "transparent"), echo = FALSE)
+knitr::opts_chunk$set(dev.args = list(bg = "transparent"))
 options(stringsAsFactors = FALSE)
 ```
 
@@ -132,6 +132,8 @@ plt <-
   .ggplot(result.dt, .aes) +
   facet_grid(~p0.lab) +
   geom_boxplot(size=.3, outlier.size=0, outlier.stroke=0) +
+  scale_y_continuous(minor_breaks = c(), breaks = c(1e-2, 5e-2, (1:9)/10)) +
+  geom_hline(yintercept = .01, lty = 2, colour = 2, size = .5) +
   scale_fill_brewer("# neighbours") +
   ylab("Discovery Rate (out of 10k genes)") +
   xlab("Variance Caused by Disease Effect (%)")
@@ -152,6 +154,8 @@ plt <-
   .ggplot(result.dt, .aes) +
   facet_grid(~p0.lab) +
   geom_boxplot(size=.3, outlier.size=0, outlier.stroke=0) +
+  scale_y_continuous(minor_breaks = c(), breaks = c(1e-2, 5e-2, (1:9)/10)) +
+  geom_hline(yintercept = .05, lty = 2, colour = 2, size = .5) +
   scale_fill_brewer("# neighbours") +
   ylab("Discovery Rate (out of 10k genes)") +
   xlab("Variance Caused by Disease Effect (%)")
@@ -172,6 +176,8 @@ plt <-
   .ggplot(result.dt, .aes) +
   facet_grid(~p0.lab) +
   geom_boxplot(size=.3, outlier.size=0, outlier.stroke=0) +
+  scale_y_continuous(minor_breaks = c(), breaks = c(1e-2, 5e-2, (1:9)/10)) +
+  geom_hline(yintercept = .10, lty = 2, colour = 2, size = .5) +
   scale_fill_brewer("# neighbours") +
   ylab("Discovery Rate (out of 10k genes)") +
   xlab("Variance Caused by Disease Effect (%)")
@@ -195,6 +201,8 @@ plt <-
   .ggplot(result.dt, .aes) +
   facet_grid(~p0.lab) +
   geom_boxplot(size=.3, outlier.size=0, outlier.stroke=0) +
+  scale_y_continuous(minor_breaks = c(), breaks = c(1e-2, 5e-2, (1:9)/10)) +
+  geom_hline(yintercept = .01, lty = 2, colour = 2, size = .5) +
   scale_fill_brewer("# neighbours") +
   ylab("empirical False Discovery Rate") +
   xlab("Variance Caused by Disease Effect (%)")
@@ -215,6 +223,8 @@ plt <-
   .ggplot(result.dt, .aes) +
   facet_grid(~p0.lab) +
   geom_boxplot(size=.3, outlier.size=0, outlier.stroke=0) +
+  scale_y_continuous(minor_breaks = c(), breaks = c(1e-2, 5e-2, (1:9)/10)) +
+  geom_hline(yintercept = .05, lty = 2, colour = 2, size = .5) +
   scale_fill_brewer("# neighbours") +
   ylab("empirical False Discovery Rate") +
   xlab("Variance Caused by Disease Effect (%)")
@@ -236,6 +246,8 @@ plt <-
   .ggplot(result.dt, .aes) +
   facet_grid(~p0.lab) +
   geom_boxplot(size=.3, outlier.size=0, outlier.stroke=0) +
+  scale_y_continuous(minor_breaks = c(), breaks = c(1e-2, 5e-2, (1:9)/10)) +
+  geom_hline(yintercept = .1, lty = 2, colour = 2, size = .5) +
   scale_fill_brewer("# neighbours") +
   ylab("empirical False Discovery Rate") +
   xlab("Variance Caused by Disease Effect (%)")
