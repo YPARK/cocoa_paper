@@ -162,7 +162,7 @@ plot.efdr <- function(.p1, .p0 = .5, .pf = 0) {
     ggtitle(.title) +
     ylab("Empirical FDR (when q-value < .01)") +
     xlab("Methods") +
-    facet_grid(. ~ N) +
+    facet_grid(ncell.per.ind ~ N) +
     scale_y_sqrt(breaks = c(1e-2, 0.1, 0.2, 0.5)) +
     scale_fill_brewer(palette="Paired") +
     scale_colour_brewer(palette="Paired") +
@@ -176,64 +176,64 @@ plot.efdr <- function(.p1, .p0 = .5, .pf = 0) {
 
 ### When there were no effects that may confound gene expressions with disease labels
 
-```{r fig.width = 8, fig.height = 3}
+```{r fig.width = 8, fig.height = 5}
 plt <- plot.efdr(.p1 = .1, .p0 = 0, .pf = 0)
 print(plt)
 .file <- fig.dir %&% "/Fig_FDR_Disease10_Conf0.pdf"
-.gg.save(.file, plt, width = 8, height = 3)
+.gg.save(.file, plt, width = 8, height = 5)
 ```
 
-```{r fig.width = 8, fig.height = 3}
+```{r fig.width = 8, fig.height = 5}
 plt <- plot.efdr(.p1 = .3, .p0 = 0, .pf = 0)
 print(plt)
 .file <- fig.dir %&% "/Fig_FDR_Disease30_Conf0.pdf"
-.gg.save(.file, plt, width = 8, height = 3)
+.gg.save(.file, plt, width = 8, height = 5)
 ```
 
 ### When there were effects confounding expressions with disease labels
 
-```{r fig.width = 8, fig.height = 3}
+```{r fig.width = 8, fig.height = 5}
 plt <- plot.efdr(.p1 = .1, .p0 = .5, .pf = 0)
 print(plt)
 .file <- fig.dir %&% "/Fig_FDR_Disease10_Conf50.pdf"
-.gg.save(.file, plt, width = 8, height = 3)
+.gg.save(.file, plt, width = 8, height = 5)
 ```
 
-```{r fig.width = 8, fig.height = 3}
+```{r fig.width = 8, fig.height = 5}
 plt <- plot.efdr(.p1 = .3, .p0 = .5, .pf = 0)
 print(plt)
 .file <- fig.dir %&% "/Fig_FDR_Disease30_Conf50.pdf"
-.gg.save(.file, plt, width = 8, height = 3)
+.gg.save(.file, plt, width = 8, height = 5)
 ```
 
 ### When sequential ignorability breaks down, but there were no confounder
 
-```{r fig.width = 8, fig.height = 3}
+```{r fig.width = 8, fig.height = 5}
 plt <- plot.efdr(.p1 = .1, .p0 = 0, .pf = .1)
 print(plt)
 .file <- fig.dir %&% "/Fig_FDR_Disease10_Conf0_Violating.pdf"
-.gg.save(.file, plt, width = 8, height = 3)
+.gg.save(.file, plt, width = 8, height = 5)
 ```
 
-```{r fig.width = 8, fig.height = 3}
+```{r fig.width = 8, fig.height = 5}
 plt <- plot.efdr(.p1 = .3, .p0 = 0, .pf = .1)
 print(plt)
 .file <- fig.dir %&% "/Fig_FDR_Disease30_Conf0_Violating.pdf"
-.gg.save(.file, plt, width = 8, height = 3)
+.gg.save(.file, plt, width = 8, height = 5)
 ```
 
 ### When sequential ignorability breaks down and there were strong confounding effects
 
-```{r fig.width = 8, fig.height = 3}
+```{r fig.width = 8, fig.height = 5}
 plt <- plot.efdr(.p1 = .1, .p0 = .5, .pf = .1)
 print(plt)
 .file <- fig.dir %&% "/Fig_FDR_Disease10_Conf50_Violating.pdf"
-.gg.save(.file, plt, width = 8, height = 3)
+.gg.save(.file, plt, width = 8, height = 5)
 ```
 
-```{r fig.width = 8, fig.height = 3}
+```{r fig.width = 8, fig.height = 5}
 plt <- plot.efdr(.p1 = .3, .p0 = .5, .pf = .1)
 print(plt)
 .file <- fig.dir %&% "/Fig_FDR_Disease30_Conf50_Violating.pdf"
-.gg.save(.file, plt, width = 8, height = 3)
+.gg.save(.file, plt, width = 8, height = 5)
 ```
