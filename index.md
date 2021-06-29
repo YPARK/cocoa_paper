@@ -1,6 +1,6 @@
 ### Counterfactual Confounder Adjustment (CoCoA) for single-cell RNA-seq differential expression analysis
 
-![](cocoa.png)
+![](CoCoA.png)
 
 (Logo by Elise Park)
 
