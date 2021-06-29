@@ -46,28 +46,28 @@ options(stringsAsFactors = FALSE)
 ```{r read_simulation_v3_data}
 .read.v3 <- function(hdr) {
 
-  .files.1 <- list.files(hdr %&% "/result/",
-                         pattern = "eval", full.names=TRUE)
+    .files.1 <- list.files(hdr %&% "/result/",
+                           pattern = "eval", full.names=TRUE)
 
-  .files.2 <- list.files(hdr %&% "/summary/",
-                         pattern = "eval.gz", full.names=TRUE)
+    .files.2 <- list.files(hdr %&% "/summary/",
+                           pattern = "eval.gz", full.names=TRUE)
 
-  .files <- c(.files.1, .files.2)
+    .files <- c(.files.1, .files.2)
 
-  ## method p1 p0 pa rseed power10 auprc auroc r r0 s0
+    ## method p1 p0 pa rseed power10 auprc auroc r r0 s0
 
-  .ct <- c("character", "character","character","character",
-           "integer",
-           "double","double","double","double","double","double")
+    .ct <- c("character", "character","character","character",
+             "integer",
+             "double","double","double","double","double","double")
 
-  .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE,
-                 colClasses = .ct)
+    .dat <- lapply(.files, .fread, header=TRUE, fill=TRUE,
+                   colClasses = .ct)
 
-  .dat <- .dat %>% 
-    do.call(what=rbind) %>%
-    mutate(p1 = as.numeric("0." %&% p1)) %>% 
-    mutate(pa = as.numeric("0." %&% pa)) %>% 
-    mutate(p0 = as.numeric("0." %&% p0))
+    .dat <- .dat %>% 
+        do.call(what=rbind) %>%
+        mutate(p1 = as.numeric("0." %&% p1)) %>% 
+        mutate(pa = as.numeric("0." %&% pa)) %>% 
+        mutate(p0 = as.numeric("0." %&% p0))
 }
 
 .read.named.v3 <- function(x) {
@@ -89,6 +89,7 @@ options(stringsAsFactors = FALSE)
 
 .file <- ".simulation.v3.rdata"
 if(!file.exists(.file)) {
+
     result.dt <-
         list.files(".", "sim_v3") %>%
         lapply(.read.named.v3) %>% 
@@ -98,6 +99,8 @@ if(!file.exists(.file)) {
 } else {
     load(.file)
 }
+
+result.dt <- result.dt[N %in% c(20, 40)]
 ```
 
 ```{r plot_v3_data}
@@ -219,8 +222,8 @@ for(ss in c(2, 5)) {
 .take.roc <- function(.dt, .method = c("cocoa", "tot", "avg", "mu", "cf")) {
 
     .ret1 <- .dt[method %in% .method,
-                .(y = mean(auprc), y.se = 2 * sd(auprc)/sqrt(.N)),
-                by = .(p1, p0, pa, method)] %>%
+                 .(y = mean(auprc), y.se = 2 * sd(auprc)/sqrt(.N)),
+                 by = .(p1, p0, pa, method)] %>%
         mutate(metric = "auprc")
 
     .ret2 <- .dt[method %in% .method,
@@ -276,28 +279,26 @@ for(ss in c(0, 2, 5)){
 
 ### 4. Additional principal component analysis can help, but over-correction by matrix factorization can hurt
 
-```{r}
-.take.auprc <- function(.dt, .method = c("cocoa.pc.safe","cocoa","tot", "tot.pc.safe","tot.pc.full", "cf")) {
-    .sum <- .dt[method %in% .method,
-                .(y = mean(auprc), y.se = 2 * sd(auprc)/sqrt(.N)),
-                by = .(p1, p0, pa, method)]
-}
-```
+```{r fig.width=7, fig.height=5}
+.method <- c("cocoa", "tot", "cocoa.pc.safe", "tot.pc.safe")
 
-```{r fig.width=4, fig.height=2.5}
-for(ss in c(0, 2, 5)){
+.dt <- result.dt[M == 50 & pa == .5 & method %in% .method] %>%
+    mutate(N = factor(N, c(40, 20), c("N = 40", "N = 20")))
 
-    .dt <- result.dt[S == ss & N == 40 & M == 50 & B == (5-ss)] %>%  .take.auprc
+.aes <- aes(x = as.factor(p1), y = auprc, fill = method)
 
-    plt <- plot.v3(.dt) +
-        ggtitle("#confounder: " %&% ss %&% " #non-confounding covariate: " %&% (5 - ss)) +
-        ylab("AUPRC")
+plt <-
+    .ggplot(.dt, .aes) +
+    facet_grid(N ~ S) +
+    ylab("AUPRC") +
+    xlab("Variance Caused by Disease Effect") +
+    geom_boxplot(outlier.size = 0, outlier.stroke = 0, size = .2) +
+    scale_fill_brewer(palette = "Paired")
 
-    print(plt)
+print(plt)
 
-    .file <- fig.dir %&% "/Fig_Q4_S" %&% ss %&% ".pdf"
-    .gg.save(.file, plot = plt, width=4, height=2.5)
-}
+.file <- fig.dir %&% "/Fig_Q4_AUPRC.pdf"
+.gg.save(.file, plot = plt, width=7, height=5)
 ```
 
 ### 5. What if we increase the sample size?
@@ -306,7 +307,7 @@ for(ss in c(0, 2, 5)){
 .methods <- c("cocoa", "tot")
 .lab <- c("CoCoA", "Total")
 
-.dt <- result.dt[S == 5 & M == 50 & p0 == .5 & method %in% .methods] %>%
+.dt <- result.dt[S == 5 & M == 50 & pa == .5 & p0 == .5 & method %in% .methods] %>%
     mutate(method = factor(method, .methods, .lab))
 
 .aes <- aes(x = as.factor(N),
