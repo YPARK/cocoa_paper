@@ -1,3 +1,11 @@
+### Required software
+
+[Matrix Market Utility](https://github.com/ypark/mmutil)
+
+### Source code for this repository 
+
+[COCOA Paper](https://github.com/ypark/cocoa_paper)
+
 ### Counterfactual Confounder Adjustment (CoCoA) for single-cell RNA-seq differential expression analysis
 
 ![](CoCoA.png)
